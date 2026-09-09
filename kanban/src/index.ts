@@ -166,7 +166,12 @@ iii.registerFunction('kanban::tickets::get', async ({ id }: { id: unknown }) => 
 })
 
 const server = await startKanbanServer(
-  { uiDirectory, getConfiguration: configurationInfo, setDataDirectory },
+  {
+    uiDirectory,
+    getConfiguration: configurationInfo,
+    setDataDirectory,
+    getTickets: () => iii.trigger({ function_id: 'kanban::tickets::list', payload: {}, timeoutMs: 10_000 }),
+  },
   Number(process.env.PORT ?? 3000),
 )
 

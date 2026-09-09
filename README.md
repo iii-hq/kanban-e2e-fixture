@@ -31,7 +31,11 @@ relative to this repository.
 The current foundation provides storage settings through `GET /api/config` and
 `PUT /api/config`. The browser uses these application endpoints; the backend
 uses iii for configuration registration, persistence and reactive reload.
-The board interface follows in a subsequent reference commit.
+The home page displays the five board columns, their counts, and persisted
+tickets with their key, title, priority and assignee. **Refresh board** fetches
+the latest tickets through `GET /api/tickets`, which invokes
+`kanban::tickets::list` over iii. **Settings** retains the storage form; returning
+to the board reloads the selected store. The board is read-only at this stage.
 
 ## Tickets
 
