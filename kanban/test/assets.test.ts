@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { startKanbanServer } from '../src/http.js'
-import { createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
+import { addComment, createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
 
 test('serves the browser UI and configuration API on exact routes', async () => {
   const uiDirectory = await mkdtemp(join(tmpdir(), 'kanban-ui-'))
@@ -24,6 +24,7 @@ test('serves the browser UI and configuration API on exact routes', async () => 
     getTicket: async (id) => getTicket(uiDirectory, id),
     updateTicket: async (id, input) => updateTicket(uiDirectory, id, input),
     deleteTicket: async (id) => deleteTicket(uiDirectory, id),
+    addComment: async (id, input) => addComment(uiDirectory, id, input),
     getConfiguration: async () => ({
       data_dir: stored.data_dir as string,
       resolved_data_dir: `/project/${stored.data_dir}`,
@@ -70,6 +71,12 @@ test('serves the browser UI and configuration API on exact routes', async () => 
     })
     assert.equal(updated.status, 200)
     assert.deepEqual(await updated.json(), { ticket: { ...createdTicket, status: 'done', assignee: 'Taylor', updated_at: getTicket(uiDirectory, createdTicket.id).updated_at } })
+    const commented = await request(`/api/tickets/${createdTicket.key}/comments`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ author: 'Taylor', body: 'Ready for review' }),
+    })
+    assert.equal(commented.status, 201)
+    assert.equal((await commented.json() as { ticket: { comments: unknown[] } }).ticket.comments.length, 1)
     const deleted = await request(`/api/tickets/${createdTicket.key}`, { method: 'DELETE' })
     assert.equal(deleted.status, 200)
     assert.equal((await deleted.json() as { ticket: { deleted_at?: string } }).ticket.deleted_at !== undefined, true)
@@ -119,6 +126,7 @@ test('rejects invalid configuration and reports save errors', async () => {
     getTicket: async () => { throw new Error('Function failed: TICKET_NOT_FOUND: KAN-404') },
     updateTicket: async () => { throw new Error('Function failed: INVALID_TICKET: invalid status') },
     deleteTicket: async () => { throw new Error('Function failed: TICKET_NOT_FOUND: KAN-404') },
+    addComment: async () => { throw new Error('Function failed: INVALID_COMMENT: body must be a non-empty string') },
     getConfiguration: async () => ({ data_dir: './data', resolved_data_dir: '/project/data' }),
     setDataDirectory: async () => { throw new Error('save failed') },
   }, 0)
@@ -155,6 +163,13 @@ test('rejects invalid configuration and reports save errors', async () => {
     })).status, 400)
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'closed' }),
+    })).status, 400)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1/comments`, { method: 'POST' })).status, 415)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1/comments`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{',
+    })).status, 400)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1/comments`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ author: 'Sam', body: '' }),
     })).status, 400)
     assert.equal((await request('{')).status, 400)
     assert.equal((await request(JSON.stringify({ data_dir: ' ' }))).status, 400)

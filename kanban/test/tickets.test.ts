@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
+import { addComment, createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
 
 async function directory() {
   return mkdtemp(join(tmpdir(), 'kanban-tickets-'))
@@ -131,6 +131,40 @@ test('rejects invalid updates without writing or resurrecting tickets', async ()
   }
 })
 
+test('persists comments and replies while edits and deletion preserve them', async () => {
+  const root = await directory()
+  try {
+    const ticket = createTicket(root, { title: 'Discuss me' })
+    const other = createTicket(root, { title: 'Other ticket' })
+    const commented = addComment(root, ticket.key, { author: '  Taylor  ', body: '  First note  ' })
+    const first = commented.comments![0]
+    assert.equal(first.author, 'Taylor')
+    assert.equal(first.body, 'First note')
+    const replied = addComment(root, ticket.id, { author: 'Sam', body: 'Reply', parent_id: first.id })
+    const reply = replied.comments![1]
+    const nested = addComment(root, ticket.key, { author: 'Taylor', body: 'Nested', parent_id: reply.id })
+    assert.deepEqual(nested.comments?.map(({ parent_id }) => parent_id), [undefined, first.id, reply.id])
+
+    const file = join(root, 'tickets.json')
+    const beforeInvalid = await readFile(file, 'utf8')
+    for (const input of [null, {}, { author: '', body: 'Note' }, { author: 'Sam', body: ' ' }, { author: 'Sam', body: 'Note', extra: true }]) {
+      assert.throws(() => addComment(root, ticket.id, input), /INVALID_COMMENT/)
+      assert.equal(await readFile(file, 'utf8'), beforeInvalid)
+    }
+    assert.throws(() => addComment(root, other.id, { author: 'Sam', body: 'Wrong ticket', parent_id: first.id }), /COMMENT_NOT_FOUND/)
+    assert.equal(await readFile(file, 'utf8'), beforeInvalid)
+
+    const edited = updateTicket(root, ticket.id, { status: 'done' })
+    assert.deepEqual(edited.comments, nested.comments)
+    const deleted = deleteTicket(root, ticket.id)
+    assert.deepEqual(deleted.comments, nested.comments)
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).find(({ id }: { id: string }) => id === ticket.id), deleted)
+    assert.throws(() => addComment(root, ticket.id, { author: 'Sam', body: 'Too late' }), /TICKET_NOT_FOUND/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('rejects invalid inputs', async () => {
   const root = await directory()
   try {
@@ -172,6 +206,15 @@ test('fails closed without overwriting a malformed store', async () => {
     const ticket = createTicket(root, { title: 'Duplicate' })
     await writeFile(file, JSON.stringify([ticket, ticket]))
     assert.throws(() => listTickets(root), /INVALID_TICKET_STORE/)
+
+    for (const comments of [
+      [{ id: crypto.randomUUID(), author: 'Sam', body: 'Note', created_at: new Date().toISOString(), extra: true }],
+      [{ id: crypto.randomUUID(), author: 'Sam', body: 'Note', created_at: 'not-a-date' }],
+      [{ id: crypto.randomUUID(), author: 'Sam', body: 'Reply', created_at: new Date().toISOString(), parent_id: crypto.randomUUID() }],
+    ]) {
+      await writeFile(file, JSON.stringify([{ ...ticket, comments }]))
+      assert.throws(() => listTickets(root), /INVALID_TICKET_STORE/)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -25,6 +25,21 @@
         <button id="edit-ticket" type="button">Edit ticket</button>
         <dl class="ticket-properties"><div><dt>Status</dt><dd id="detail-ticket-status"></dd></div><div><dt>Priority</dt><dd id="detail-priority"></dd></div><div><dt>Assignee</dt><dd id="detail-assignee"></dd></div></dl>
         <h2>Description</h2><p id="detail-description"></p>
+        <section class="activity" aria-labelledby="activity-title">
+          <h2 id="activity-title">Activity</h2>
+          <p id="activity-empty">No comments yet. Start the conversation.</p>
+          <ol id="activity-list" aria-label="Comments, oldest first"></ol>
+          <form id="comment-form">
+            <fieldset id="comment-fields">
+              <legend>Add a comment</legend>
+              <p id="reply-context" hidden></p><button id="reply-cancel" type="button" hidden>Cancel reply</button>
+              <label for="comment-author">Your name</label><input id="comment-author" name="author" required autocomplete="name">
+              <label for="comment-body">Comment</label><textarea id="comment-body" name="body" required rows="3"></textarea>
+              <div class="actions"><button id="comment-submit">Post comment</button></div>
+            </fieldset>
+            <p id="comment-status" role="status"></p>
+          </form>
+        </section>
         <div class="delete-area"><p>Deleting removes this ticket from the board. Its data stays on disk.</p><button id="delete-ticket" type="button">Delete ticket</button></div>
       </div>
       <form id="edit-form" hidden>

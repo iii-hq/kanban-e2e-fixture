@@ -74,6 +74,21 @@ textarea { resize: vertical; min-height: 90px; }
 .delete-area { margin-top: 40px; border-top: 1px solid #dfdcd6; padding-top: 20px; }
 .delete-area p { font-size: 13px; color: #68655f; line-height: 1.6; }
 #delete-ticket { color: #953e2a; background: #f3dcd4; }
+.activity { margin-top: 40px; border-top: 1px solid #dfdcd6; padding-top: 24px; }
+#activity-empty, #comment-status { color: #68655f; font-size: 13px; line-height: 1.6; }
+#activity-list { list-style: none; padding: 0 0 0 20px; border-left: 1px solid #d3cfc7; }
+#activity-list li { position: relative; padding: 16px; margin: 16px 0; border-radius: 6px; background: #faf9f7; overflow-wrap: anywhere; }
+#activity-list li::before { content: ''; position: absolute; left: -25px; top: 22px; width: 9px; height: 9px; background: #68655f; border-radius: 50%; }
+#activity-list li:focus { outline: 2px solid #b8420f; outline-offset: 3px; }
+#activity-list strong { font-size: 14px; }
+#activity-list time { display: block; color: #68655f; font-size: 12px; margin-top: 5px; }
+.comment-body { white-space: pre-wrap; line-height: 1.6; font-size: 14px; }
+.comment-reply, #reply-cancel { background: #e5e2dc; color: #22221f; }
+.comment-reference { display: block; width: 100%; margin-top: 16px; text-align: left; background: #eeece8; color: #57544e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#reply-context { overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; max-height: 100px; overflow-y: auto; }
+#comment-form { margin-top: 24px; }
+#comment-fields legend { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+#comment-status { min-height: 21px; margin-bottom: 0; }
 [hidden] { display: none !important; }
 @media (max-width: 600px) {
   .site-header { padding: 16px 20px; }

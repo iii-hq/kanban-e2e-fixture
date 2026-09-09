@@ -9,7 +9,7 @@ import {
   type KanbanConfiguration,
 } from './config.js'
 import { startKanbanServer } from './http.js'
-import { createTicket, createTicketSchema, deleteTicket, getTicket, listTickets, ticketSchema, updateTicket, updateTicketSchema } from './tickets.js'
+import { addComment, addCommentSchema, createTicket, createTicketSchema, deleteTicket, getTicket, listTickets, ticketSchema, updateTicket, updateTicketSchema } from './tickets.js'
 
 const WORKER = 'kanban'
 const CONFIG_RELOAD_FUNCTION = 'kanban::config::reload'
@@ -189,6 +189,22 @@ iii.registerFunction('kanban::tickets::delete', async ({ id }: { id: unknown }) 
   request_format: { type: 'object', properties: { id: { type: 'string', minLength: 1 } }, required: ['id'] },
   response_format: ticketSchema,
 })
+iii.registerFunction('kanban::tickets::comment', async (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('INVALID_COMMENT: expected a comment envelope')
+  }
+  const { id, comment } = payload as { id: unknown; comment: unknown }
+  return addComment(dataDirectory, id, comment)
+}, {
+  description: 'Add a comment or reply to a persisted ticket.',
+  request_format: {
+    type: 'object',
+    properties: { id: { type: 'string', minLength: 1 }, comment: addCommentSchema },
+    required: ['id', 'comment'],
+    additionalProperties: false,
+  },
+  response_format: ticketSchema,
+})
 
 const server = await startKanbanServer(
   {
@@ -200,6 +216,7 @@ const server = await startKanbanServer(
     getTicket: (id) => iii.trigger({ function_id: 'kanban::tickets::get', payload: { id }, timeoutMs: 10_000 }),
     updateTicket: (id, input) => iii.trigger({ function_id: 'kanban::tickets::update', payload: { id, changes: input }, timeoutMs: 10_000 }),
     deleteTicket: (id) => iii.trigger({ function_id: 'kanban::tickets::delete', payload: { id }, timeoutMs: 10_000 }),
+    addComment: (id, input) => iii.trigger({ function_id: 'kanban::tickets::comment', payload: { id, comment: input }, timeoutMs: 10_000 }),
   },
   Number(process.env.PORT ?? 3000),
 )
