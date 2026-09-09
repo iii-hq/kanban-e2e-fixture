@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { createServer, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
+import type { Ticket } from './tickets.js'
 
 type ConfigurationInfo = {
   data_dir: string
@@ -11,6 +12,7 @@ type HttpOptions = {
   uiDirectory: string
   getConfiguration: () => Promise<ConfigurationInfo>
   setDataDirectory: (dataDirectory: string) => Promise<ConfigurationInfo>
+  getTickets: () => Promise<{ tickets: Ticket[] }>
 }
 
 const assets = new Map([
@@ -29,6 +31,11 @@ export function createKanbanServer(options: HttpOptions): Server {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost')
+
+      if (request.method === 'GET' && url.pathname === '/api/tickets') {
+        json(response, 200, await options.getTickets())
+        return
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/config') {
         json(response, 200, await options.getConfiguration())
