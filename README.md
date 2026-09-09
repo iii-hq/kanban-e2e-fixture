@@ -35,7 +35,14 @@ The home page displays the five board columns, their counts, and persisted
 tickets with their key, title, priority and assignee. **Refresh board** fetches
 the latest tickets through `GET /api/tickets`, which invokes
 `kanban::tickets::list` over iii. **Settings** retains the storage form; returning
-to the board reloads the selected store. The board is read-only at this stage.
+to the board reloads the selected store.
+
+**New ticket** opens a creation modal. After saving, the modal closes and the
+ticket opens in its own detail panel in the same browser tab. Board cards also
+open this panel, with a URL hash that supports direct links and browser history.
+The detail panel shows the ticket fields and offers **Delete ticket**. Deletion
+returns to the board and hides the ticket without removing its record from disk.
+Editing, drag-and-drop, comments and live board synchronization are not yet included.
 
 ## Tickets
 
@@ -50,6 +57,12 @@ The application exposes these iii functions:
 | `kanban::tickets::create` | Required `title`; optional `description`, `status`, `priority`, `assignee` | Persisted ticket |
 | `kanban::tickets::list` | `{}` | `{ "tickets": [...] }` in creation order |
 | `kanban::tickets::get` | `{ "id": "KAN-1" }` or a UUID | Matching ticket; error if absent |
+| `kanban::tickets::delete` | `{ "id": "KAN-1" }` or a UUID | Ticket marked with `deleted_at`; error if absent |
+
+The browser uses `POST /api/tickets` to create, and `GET` / `DELETE`
+`/api/tickets/:id` to open or delete a ticket. These endpoints invoke the iii
+functions and return `{ "ticket": ... }`. Both UUIDs and readable keys work.
+Deleted tickets are excluded from list and get; their identifiers are never reused.
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, and `done`.
 Priorities are `low`, `medium`, `high`, and `urgent`. New tickets default to

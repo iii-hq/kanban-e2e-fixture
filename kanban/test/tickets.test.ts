@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createTicket, getTicket, listTickets } from '../src/tickets.js'
+import { createTicket, deleteTicket, getTicket, listTickets } from '../src/tickets.js'
 
 async function directory() {
   return mkdtemp(join(tmpdir(), 'kanban-tickets-'))
@@ -59,6 +59,26 @@ test('serial calls keep keys unique and stores remain isolated when directories 
   }
 })
 
+test('soft-deletes tickets without reusing keys', async () => {
+  const root = await directory()
+  try {
+    const first = createTicket(root, { title: 'Remove me' })
+    const deleted = deleteTicket(root, first.key)
+
+    assert.equal(deleted.id, first.id)
+    assert.equal(deleted.deleted_at, deleted.updated_at)
+    assert.deepEqual(listTickets(root), [])
+    assert.throws(() => getTicket(root, first.id), /TICKET_NOT_FOUND/)
+    assert.throws(() => deleteTicket(root, first.key), /TICKET_NOT_FOUND/)
+
+    const stored = JSON.parse(await readFile(join(root, 'tickets.json'), 'utf8'))
+    assert.deepEqual(stored, [deleted])
+    assert.equal(createTicket(root, { title: 'After restart' }).key, 'KAN-2')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('rejects invalid inputs', async () => {
   const root = await directory()
   try {
@@ -76,6 +96,7 @@ test('rejects invalid inputs', async () => {
     }
     assert.throws(() => getTicket(root, null), /INVALID_TICKET_ID/)
     assert.throws(() => getTicket(root, 'KAN-404'), /TICKET_NOT_FOUND/)
+    assert.throws(() => deleteTicket(root, null), /INVALID_TICKET_ID/)
     assert.deepEqual(listTickets(root), [])
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { createServer, type Server, type ServerResponse } from 'node:http'
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { join } from 'node:path'
 import type { Ticket } from './tickets.js'
 
@@ -13,6 +13,9 @@ type HttpOptions = {
   getConfiguration: () => Promise<ConfigurationInfo>
   setDataDirectory: (dataDirectory: string) => Promise<ConfigurationInfo>
   getTickets: () => Promise<{ tickets: Ticket[] }>
+  createTicket: (input: unknown) => Promise<Ticket>
+  getTicket: (id: string) => Promise<Ticket>
+  deleteTicket: (id: string) => Promise<Ticket>
 }
 
 const assets = new Map([
@@ -27,6 +30,28 @@ function json(response: ServerResponse, status: number, body: unknown) {
   response.end(JSON.stringify(body))
 }
 
+async function readJson(request: IncomingMessage): Promise<unknown> {
+  request.setEncoding('utf8')
+  let body = ''
+  for await (const chunk of request) {
+    body += chunk
+    if (body.length > 65_536) throw new Error('REQUEST_TOO_LARGE')
+  }
+  try {
+    return JSON.parse(body)
+  } catch {
+    throw new Error('INVALID_JSON')
+  }
+}
+
+function errorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error)
+  if (message.includes('REQUEST_TOO_LARGE')) return 413
+  if (error instanceof URIError || message.includes('INVALID_JSON') || /INVALID_TICKET(?:_ID)?:/.test(message)) return 400
+  if (message.includes('TICKET_NOT_FOUND')) return 404
+  return 500
+}
+
 export function createKanbanServer(options: HttpOptions): Server {
   return createServer(async (request, response) => {
     try {
@@ -37,28 +62,32 @@ export function createKanbanServer(options: HttpOptions): Server {
         return
       }
 
+      if (request.method === 'POST' && url.pathname === '/api/tickets') {
+        if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+          json(response, 415, { error: 'UNSUPPORTED_MEDIA_TYPE' })
+          return
+        }
+        json(response, 201, { ticket: await options.createTicket(await readJson(request)) })
+        return
+      }
+
+      const ticketRoute = url.pathname.match(/^\/api\/tickets\/([^/]+)$/)
+      if (ticketRoute && (request.method === 'GET' || request.method === 'DELETE')) {
+        const id = decodeURIComponent(ticketRoute[1])
+        const ticket = request.method === 'GET'
+          ? await options.getTicket(id)
+          : await options.deleteTicket(id)
+        json(response, 200, { ticket })
+        return
+      }
+
       if (request.method === 'GET' && url.pathname === '/api/config') {
         json(response, 200, await options.getConfiguration())
         return
       }
 
       if (request.method === 'PUT' && url.pathname === '/api/config') {
-        let body = ''
-        for await (const chunk of request) {
-          body += chunk
-          if (body.length > 65_536) {
-            json(response, 413, { error: 'REQUEST_TOO_LARGE' })
-            return
-          }
-        }
-
-        let input: unknown
-        try {
-          input = JSON.parse(body)
-        } catch {
-          json(response, 400, { error: 'INVALID_JSON' })
-          return
-        }
+        const input = await readJson(request)
         const dataDirectory = input && typeof input === 'object' && !Array.isArray(input)
           ? (input as Record<string, unknown>).data_dir
           : undefined
@@ -82,7 +111,7 @@ export function createKanbanServer(options: HttpOptions): Server {
 
       json(response, 404, { error: 'NOT_FOUND' })
     } catch (error) {
-      json(response, 500, { error: error instanceof Error ? error.message : String(error) })
+      json(response, errorStatus(error), { error: error instanceof Error ? error.message : String(error) })
     }
   })
 }

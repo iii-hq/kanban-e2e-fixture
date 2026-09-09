@@ -11,9 +11,21 @@
   <header class="site-header"><a href="#board">Kanban <span>Workspace</span></a><nav aria-label="Workspace"><a href="#board" id="board-link" aria-current="page">Board</a><a href="#settings" id="settings-link">Settings</a></nav></header>
   <main>
     <section id="board-view" aria-labelledby="board-title">
-      <div class="board-heading"><div><p class="eyebrow">Your workspace</p><h1 id="board-title">The board.</h1><p class="intro">A clear view of work, from idea to done.</p></div><button id="refresh" type="button">Refresh board</button></div>
+      <div class="board-heading"><div><p class="eyebrow">Your workspace</p><h1 id="board-title">The board.</h1><p class="intro">A clear view of work, from idea to done.</p></div><div class="board-actions"><button id="refresh" type="button">Refresh board</button><button id="new-ticket" type="button">New ticket</button></div></div>
       <div class="board-summary"><p id="ticket-count">— tickets</p><p id="board-status" role="status" aria-live="polite">Loading tickets…</p><button id="board-retry" type="button" hidden>Retry</button></div>
       <div id="board" class="board" role="region" aria-label="Ticket board, scroll horizontally to see all columns" tabindex="0" aria-busy="true"></div>
+    </section>
+    <section id="ticket-view" aria-labelledby="detail-title" hidden>
+      <a class="back-link" href="#board">← Back to board</a>
+      <p class="eyebrow" id="detail-key"></p>
+      <h1 id="detail-title" tabindex="-1">Ticket</h1>
+      <p id="detail-status" role="status"></p>
+      <button id="detail-retry" type="button" hidden>Retry</button>
+      <div id="detail-content" hidden>
+        <dl class="ticket-properties"><div><dt>Status</dt><dd id="detail-ticket-status"></dd></div><div><dt>Priority</dt><dd id="detail-priority"></dd></div><div><dt>Assignee</dt><dd id="detail-assignee"></dd></div></dl>
+        <h2>Description</h2><p id="detail-description"></p>
+        <div class="delete-area"><p>Deleting removes this ticket from the board. Its data stays on disk.</p><button id="delete-ticket" type="button">Delete ticket</button></div>
+      </div>
     </section>
     <section id="settings-view" aria-labelledby="settings-title" hidden>
     <p class="eyebrow">Workspace settings</p>
@@ -30,5 +42,18 @@
     </form>
     </section>
   </main>
+  <dialog id="create-dialog" aria-labelledby="create-title">
+    <form id="create-ticket">
+      <p class="eyebrow">Add to your board</p><h2 id="create-title">New ticket</h2>
+      <fieldset id="create-fields">
+        <label for="ticket-title">Title</label><input id="ticket-title" name="title" required autofocus>
+        <label for="ticket-description">Description</label><textarea id="ticket-description" name="description" rows="4"></textarea>
+        <div class="field-row"><div><label for="ticket-status">Status</label><select id="ticket-status" name="status"><option value="backlog">Backlog</option><option value="todo">To do</option><option value="in_progress">In progress</option><option value="in_review">In review</option><option value="done">Done</option></select></div><div><label for="ticket-priority">Priority</label><select id="ticket-priority" name="priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select></div></div>
+        <label for="ticket-assignee">Assignee</label><input id="ticket-assignee" name="assignee" placeholder="Unassigned">
+        <div class="actions"><button id="create-submit">Create ticket</button><button id="create-cancel" type="button">Cancel</button></div>
+      </fieldset>
+      <p id="create-status" role="status"></p>
+    </form>
+  </dialog>
 </body>
 </html>

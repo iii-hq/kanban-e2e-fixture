@@ -26,6 +26,7 @@ async function request(method: 'GET' | 'PUT') {
     if (!response.ok) throw new Error(`Unable to ${method === 'GET' ? 'load' : 'save'} settings (${response.status}).`)
     const config = await response.json()
     if (method === 'PUT' && !boardView.hidden) void loadBoard()
+    if (method === 'PUT' && !ticketView.hidden) void loadTicket()
     if (current !== configRequest) return
     input.value = config.data_dir
     resolved.textContent = config.resolved_data_dir
@@ -51,18 +52,27 @@ form.addEventListener('submit', (event) => {
 })
 retry.addEventListener('click', () => { void request('GET') })
 function showView() {
+  const leavingTicket = !ticketView.hidden
   const settings = location.hash === '#settings'
-  boardView.hidden = settings
+  const ticket = location.hash.startsWith('#ticket/')
+  boardView.hidden = settings || ticket
   settingsView.hidden = !settings
-  document.title = `Kanban · ${settings ? 'Settings' : 'Board'}`
+  ticketView.hidden = !ticket
+  ++detailRequest
+  document.title = `Kanban · ${settings ? 'Settings' : ticket ? 'Ticket' : 'Board'}`
   document.querySelector(settings ? '#board-link' : '#settings-link')!.removeAttribute('aria-current')
   document.querySelector(settings ? '#settings-link' : '#board-link')!.setAttribute('aria-current', 'page')
-  if (settings) {
+  if (ticket) {
+    ++boardRequest
+    if (!saving) ++configRequest
+    void loadTicket()
+  } else if (settings) {
     ++boardRequest
     if (!saving) void request('GET')
   } else {
     if (!saving) ++configRequest
     void loadBoard()
+    if (leavingTicket) document.querySelector<HTMLButtonElement>('#new-ticket')!.focus()
   }
 }
 
@@ -96,8 +106,9 @@ function renderBoard(tickets: Ticket[] | null) {
     heading.append(count)
     lane.append(heading)
     for (const ticket of items ?? []) {
-      const card = document.createElement('article')
+      const card = document.createElement('a')
       card.className = 'ticket'
+      card.href = `#ticket/${ticket.id}`
       card.dataset.ticketId = ticket.id
       const key = document.createElement('p')
       key.className = 'ticket-key'
@@ -155,6 +166,111 @@ async function loadBoard() {
     }
   }
 }
+
+const ticketView = document.querySelector<HTMLElement>('#ticket-view')!
+const detailTitle = document.querySelector<HTMLElement>('#detail-title')!
+const detailStatus = document.querySelector<HTMLElement>('#detail-status')!
+const detailContent = document.querySelector<HTMLElement>('#detail-content')!
+const detailRetry = document.querySelector<HTMLButtonElement>('#detail-retry')!
+const deleteTicket = document.querySelector<HTMLButtonElement>('#delete-ticket')!
+let detailRequest = 0
+let selectedTicket: Ticket | undefined
+
+async function loadTicket() {
+  const current = ++detailRequest
+  selectedTicket = undefined
+  detailContent.hidden = true
+  detailRetry.hidden = true
+  detailTitle.textContent = 'Ticket'
+  document.querySelector('#detail-key')!.textContent = ''
+  detailStatus.textContent = 'Loading ticket…'
+  ticketView.setAttribute('aria-busy', 'true')
+  detailTitle.focus()
+  try {
+    const response = await fetch(`/api/tickets/${encodeURIComponent(decodeURIComponent(location.hash.slice(8)))}`)
+    if (!response.ok) throw new Error(response.status === 404 ? 'Ticket not found.' : `Unable to load ticket (${response.status}).`)
+    const { ticket }: { ticket: Ticket } = await response.json()
+    if (current !== detailRequest) return
+    selectedTicket = ticket
+    document.title = `Kanban · ${ticket.key}`
+    document.querySelector('#detail-key')!.textContent = ticket.key
+    detailTitle.textContent = ticket.title
+    document.querySelector('#detail-description')!.textContent = ticket.description || 'No description.'
+    document.querySelector('#detail-ticket-status')!.textContent = lanes.find(([status]) => status === ticket.status)![1]
+    document.querySelector('#detail-priority')!.textContent = ticket.priority
+    document.querySelector('#detail-assignee')!.textContent = ticket.assignee ?? 'Unassigned'
+    detailContent.hidden = false
+    deleteTicket.disabled = false
+    detailStatus.textContent = ''
+  } catch (error) {
+    if (current !== detailRequest) return
+    detailStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
+    detailRetry.hidden = false
+  } finally {
+    if (current === detailRequest) ticketView.setAttribute('aria-busy', 'false')
+  }
+}
+
+detailRetry.addEventListener('click', () => { void loadTicket() })
+deleteTicket.addEventListener('click', async () => {
+  if (!selectedTicket || deleteTicket.disabled) return
+  const current = detailRequest
+  deleteTicket.disabled = true
+  detailStatus.textContent = 'Deleting ticket…'
+  try {
+    const response = await fetch(`/api/tickets/${encodeURIComponent(selectedTicket.id)}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error(`Unable to delete ticket (${response.status}).`)
+    if (current === detailRequest) {
+      location.hash = '#board'
+    } else if (!boardView.hidden) {
+      void loadBoard()
+    }
+  } catch (error) {
+    if (current !== detailRequest) return
+    detailStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
+    deleteTicket.disabled = false
+  }
+})
+
+const createDialog = document.querySelector<HTMLDialogElement>('#create-dialog')!
+const createForm = document.querySelector<HTMLFormElement>('#create-ticket')!
+const createFields = document.querySelector<HTMLFieldSetElement>('#create-fields')!
+const createStatus = document.querySelector<HTMLElement>('#create-status')!
+document.querySelector('#new-ticket')!.addEventListener('click', () => {
+  createForm.reset()
+  createStatus.textContent = ''
+  createDialog.showModal()
+})
+document.querySelector('#create-cancel')!.addEventListener('click', () => { createDialog.close() })
+createDialog.addEventListener('cancel', (event) => { if (createFields.disabled) event.preventDefault() })
+createForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  if (createFields.disabled) return
+  const data = Object.fromEntries(new FormData(createForm))
+  if (!String(data.title).trim()) {
+    createStatus.textContent = 'Enter a title.'
+    document.querySelector<HTMLInputElement>('#ticket-title')!.focus()
+    return
+  }
+  createFields.disabled = true
+  createForm.setAttribute('aria-busy', 'true')
+  createStatus.textContent = 'Creating ticket…'
+  try {
+    const response = await fetch('/api/tickets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, assignee: String(data.assignee).trim() || null }),
+    })
+    if (!response.ok) throw new Error(`Unable to create ticket (${response.status}).`)
+    const { ticket }: { ticket: Ticket } = await response.json()
+    createDialog.close()
+    location.hash = `#ticket/${ticket.id}`
+  } catch (error) {
+    createStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
+  } finally {
+    createFields.disabled = false
+    createForm.setAttribute('aria-busy', 'false')
+  }
+})
 
 refresh.addEventListener('click', () => { void loadBoard() })
 boardRetry.addEventListener('click', () => { void loadBoard() })
