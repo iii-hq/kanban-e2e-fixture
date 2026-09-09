@@ -9,6 +9,7 @@ import {
   type KanbanConfiguration,
 } from './config.js'
 import { startKanbanServer } from './http.js'
+import { createTicket, createTicketSchema, getTicket, listTickets, ticketSchema } from './tickets.js'
 
 const WORKER = 'kanban'
 const CONFIG_RELOAD_FUNCTION = 'kanban::config::reload'
@@ -143,6 +144,27 @@ iii.registerTrigger({
 })
 
 await initializeConfiguration()
+
+iii.registerFunction('kanban::tickets::create', async ({ _caller_worker_id, ...input }: Record<string, unknown>) => createTicket(dataDirectory, input), {
+  description: 'Create and persist a ticket with a UUID and a human-readable KAN-number key.',
+  request_format: createTicketSchema,
+  response_format: ticketSchema,
+})
+iii.registerFunction('kanban::tickets::list', async () => ({ tickets: listTickets(dataDirectory) }), {
+  description: 'List tickets from the configured data directory in creation order.',
+  request_format: { type: 'object', properties: {} },
+  response_format: {
+    type: 'object',
+    properties: { tickets: { type: 'array', items: ticketSchema } },
+    required: ['tickets'],
+  },
+})
+iii.registerFunction('kanban::tickets::get', async ({ id }: { id: unknown }) => getTicket(dataDirectory, id), {
+  description: 'Get a persisted ticket by its internal UUID or human-readable key, such as KAN-1.',
+  request_format: { type: 'object', properties: { id: { type: 'string', minLength: 1 } }, required: ['id'] },
+  response_format: ticketSchema,
+})
+
 const server = await startKanbanServer(
   { uiDirectory, getConfiguration: configurationInfo, setDataDirectory },
   Number(process.env.PORT ?? 3000),
