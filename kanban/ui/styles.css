@@ -9,6 +9,7 @@ nav a { padding: 9px 12px; border-radius: 6px; }
 .site-header nav a { font-size: 13px; font-weight: 500; color: #68655f; }
 .site-header nav a[aria-current] { background: #e5e2dc; color: #22221f; }
 main { max-width: 1680px; margin: 44px auto; padding: 0 clamp(20px, 4vw, 64px); }
+#live-status { font-size: 12px; color: #68655f; margin: 0 0 20px; }
 #settings-view { max-width: 672px; margin: 64px auto; }
 .eyebrow { text-transform: uppercase; font-size: 11px; letter-spacing: .12em; color: #68655f; }
 h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -.04em; margin: 12px 0; font-weight: 600; }

@@ -46,7 +46,18 @@ The detail panel also supports editing title, description, status, priority and
 assignee. Save persists the changes; cancel discards the draft. Drag a card to
 another board column to change its status. The card moves after the server
 confirms the update. Keyboard and touch users can change status in the detail
-editor. Live synchronization across viewers is not yet included.
+editor.
+
+Open sessions update automatically when tickets are created, edited, moved,
+deleted or commented on, including changes made directly through iii functions.
+`GET /api/events` sends SSE `change` notifications after successful persistence;
+the browser reloads the visible board or ticket from the API. Reconnection
+refreshes the latest state, so missed notifications do not require page reload.
+Live updates preserve edit and comment drafts. Saving an edit sends only the
+fields changed locally; simultaneous edits to the same field use the last
+successful write. Switching the configured store clears drafts from the old
+store. Files edited outside the application and multiple application processes
+sharing a store are not supported by this notification mechanism.
 
 The activity timeline shows comments and replies in posting order. Enter a name
 and a comment, or reply to an existing entry. Replies identify their parent

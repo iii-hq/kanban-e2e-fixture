@@ -10,6 +10,8 @@ type ConfigurationInfo = {
 
 type HttpOptions = {
   uiDirectory: string
+  getEventStore: () => string
+  subscribeEvents: (listener: (store: string) => void) => () => void
   getConfiguration: () => Promise<ConfigurationInfo>
   setDataDirectory: (dataDirectory: string) => Promise<ConfigurationInfo>
   getTickets: () => Promise<{ tickets: Ticket[] }>
@@ -55,9 +57,51 @@ function errorStatus(error: unknown): number {
 }
 
 export function createKanbanServer(options: HttpOptions): Server {
-  return createServer(async (request, response) => {
+  const clients = new Set<() => void>()
+  const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost')
+
+      if (request.method === 'GET' && url.pathname === '/api/events') {
+        response.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+          'x-accel-buffering': 'no',
+        })
+        let closed = false
+        let heartbeat: NodeJS.Timeout | undefined
+        let unsubscribe = () => {}
+        const cleanup = () => {
+          if (closed) return
+          closed = true
+          if (heartbeat) clearInterval(heartbeat)
+          unsubscribe()
+          clients.delete(cleanup)
+        }
+        const send = (store: string) => {
+          if (!closed && !response.write(`event: change\ndata: ${JSON.stringify({ store })}\n\n`)) {
+            cleanup()
+            response.destroy()
+          }
+        }
+        unsubscribe = options.subscribeEvents(send)
+        clients.add(cleanup)
+        request.once('close', cleanup)
+        response.once('close', cleanup)
+        response.once('error', cleanup)
+        send(options.getEventStore())
+        if (!closed) {
+          heartbeat = setInterval(() => {
+            if (!response.write(': heartbeat\n\n')) {
+              cleanup()
+              response.destroy()
+            }
+          }, 15_000)
+          heartbeat.unref()
+        }
+        return
+      }
 
       if (request.method === 'GET' && url.pathname === '/api/tickets') {
         json(response, 200, await options.getTickets())
@@ -134,6 +178,10 @@ export function createKanbanServer(options: HttpOptions): Server {
       json(response, errorStatus(error), { error: error instanceof Error ? error.message : String(error) })
     }
   })
+  server.on('close', () => {
+    for (const cleanup of clients) cleanup()
+  })
+  return server
 }
 
 export async function startKanbanServer(options: HttpOptions, port: number): Promise<Server> {

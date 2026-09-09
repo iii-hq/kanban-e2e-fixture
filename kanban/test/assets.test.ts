@@ -8,6 +8,34 @@ import test from 'node:test'
 import { startKanbanServer } from '../src/http.js'
 import { addComment, createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
 
+async function connectEvents(url: string) {
+  const controller = new AbortController()
+  const response = await fetch(url, { signal: controller.signal })
+  assert.equal(response.status, 200)
+  assert.match(response.headers.get('content-type') ?? '', /^text\/event-stream/)
+  const reader = response.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  return {
+    async next() {
+      while (!buffer.includes('\n\n')) {
+        const { done, value } = await reader.read()
+        assert.equal(done, false)
+        buffer += decoder.decode(value, { stream: true })
+      }
+      const end = buffer.indexOf('\n\n')
+      const event = buffer.slice(0, end)
+      buffer = buffer.slice(end + 2)
+      assert.match(event, /^event: change\ndata: /)
+      return JSON.parse(event.slice(event.indexOf('data: ') + 6)) as { store: string }
+    },
+    async close() {
+      controller.abort()
+      await reader.cancel().catch(() => {})
+    },
+  }
+}
+
 test('serves the browser UI and configuration API on exact routes', async () => {
   const uiDirectory = await mkdtemp(join(tmpdir(), 'kanban-ui-'))
   await Promise.all([
@@ -16,9 +44,15 @@ test('serves the browser UI and configuration API on exact routes', async () => 
     writeFile(join(uiDirectory, 'styles.css'), 'main { display: block }'),
   ])
   let stored: Record<string, unknown> = { data_dir: './data', future_setting: true }
+  const listeners = new Set<(store: string) => void>()
   const ticket = createTicket(uiDirectory, { title: 'Visible on the board', status: 'in_review' })
   const server = await startKanbanServer({
     uiDirectory,
+    getEventStore: () => uiDirectory,
+    subscribeEvents: (listener) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
     getTickets: async () => ({ tickets: listTickets(uiDirectory) }),
     createTicket: async (input) => createTicket(uiDirectory, input),
     getTicket: async (id) => getTicket(uiDirectory, id),
@@ -121,6 +155,8 @@ test('serves the browser UI and configuration API on exact routes', async () => 
 test('rejects invalid configuration and reports save errors', async () => {
   const server = await startKanbanServer({
     uiDirectory: '.',
+    getEventStore: () => '/project/data',
+    subscribeEvents: () => () => {},
     getTickets: async () => { throw new Error('INVALID_TICKET_STORE: store unavailable') },
     createTicket: async () => { throw new Error('Function failed: INVALID_TICKET: title must be a non-empty string') },
     getTicket: async () => { throw new Error('Function failed: TICKET_NOT_FOUND: KAN-404') },
@@ -178,5 +214,103 @@ test('rejects invalid configuration and reports save errors', async () => {
     assert.deepEqual(await failed.json(), { error: 'save failed' })
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  }
+})
+
+test('streams initial, persisted mutation and configuration events to connected clients', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'kanban-events-'))
+  let store = directory
+  const listeners = new Set<(nextStore: string) => void>()
+  let resolveDisconnected!: () => void
+  const disconnected = new Promise<void>((resolve) => { resolveDisconnected = resolve })
+  const emit = () => {
+    for (const listener of listeners) listener(store)
+  }
+  const server = await startKanbanServer({
+    uiDirectory: '.',
+    getEventStore: () => store,
+    subscribeEvents: (listener) => {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size === 0) resolveDisconnected()
+      }
+    },
+    getTickets: async () => ({ tickets: listTickets(store) }),
+    createTicket: async (input) => {
+      const ticket = createTicket(store, input)
+      emit()
+      return ticket
+    },
+    getTicket: async (id) => getTicket(store, id),
+    updateTicket: async (id, input) => {
+      const ticket = updateTicket(store, id, input)
+      emit()
+      return ticket
+    },
+    deleteTicket: async (id) => {
+      const ticket = deleteTicket(store, id)
+      emit()
+      return ticket
+    },
+    addComment: async (id, input) => {
+      const ticket = addComment(store, id, input)
+      emit()
+      return ticket
+    },
+    getConfiguration: async () => ({ data_dir: store, resolved_data_dir: store }),
+    setDataDirectory: async (dataDirectory) => {
+      store = dataDirectory
+      emit()
+      return { data_dir: store, resolved_data_dir: store }
+    },
+  }, 0)
+  const port = (server.address() as AddressInfo).port
+  const base = `http://127.0.0.1:${port}`
+  const [first, second] = await Promise.all([
+    connectEvents(`${base}/api/events`),
+    connectEvents(`${base}/api/events`),
+  ])
+
+  try {
+    assert.deepEqual(await Promise.all([first.next(), second.next()]), [{ store: directory }, { store: directory }])
+
+    const created = await fetch(`${base}/api/tickets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Live ticket' }),
+    })
+    assert.equal(created.status, 201)
+    assert.deepEqual(await Promise.all([first.next(), second.next()]), [{ store: directory }, { store: directory }])
+
+    const invalid = await fetch(`${base}/api/tickets`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '' }),
+    })
+    assert.equal(invalid.status, 400)
+
+    const nextStore = join(directory, 'other')
+    const configured = await fetch(`${base}/api/config`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ data_dir: nextStore }),
+    })
+    assert.equal(configured.status, 200)
+    assert.deepEqual(await Promise.all([first.next(), second.next()]), [{ store: nextStore }, { store: nextStore }])
+  } finally {
+    await Promise.all([first.close(), second.close()])
+    let timeout: NodeJS.Timeout | undefined
+    await Promise.race([
+      disconnected,
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error('SSE clients did not unsubscribe')), 5_000) }),
+    ])
+    if (timeout) clearTimeout(timeout)
+    assert.equal(listeners.size, 0)
+    assert.equal((await fetch(`${base}/api/config`)).status, 200)
+    const closed = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+    server.closeAllConnections()
+    await closed
+    await rm(directory, { recursive: true, force: true })
   }
 })
