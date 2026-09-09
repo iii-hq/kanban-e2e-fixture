@@ -39,6 +39,8 @@ button:disabled { opacity: .45; cursor: default; }
 .lane-count { font-size: 11px; font-weight: 500; color: #68655f; background: #f2f0ed; border-radius: 5px; min-width: 23px; padding: 3px 6px; text-align: center; }
 .ticket { display: block; color: inherit; text-decoration: none; background: #faf9f7; border: 1px solid #dedbd4; border-radius: 6px; padding: 15px; margin-top: 10px; overflow-wrap: anywhere; }
 .ticket:hover { border-color: #aaa297; }
+.ticket[draggable="true"] { cursor: grab; }
+.lane.drop-target { outline: 2px solid #b8420f; outline-offset: -2px; }
 .ticket-key { margin: 0 0 9px; color: #68655f; font: 11px ui-monospace, monospace; }
 .ticket h3 { font-size: 14px; font-weight: 550; line-height: 1.5; margin: 0; }
 .ticket-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 20px; font-size: 11px; }
@@ -48,7 +50,7 @@ button:disabled { opacity: .45; cursor: default; }
 .assignee { color: #68655f; }
 .lane-empty { color: #68655f; text-align: center; font-size: 12px; padding: 24px 8px; border: 1px dashed #d3cfc7; border-radius: 6px; }
 .board-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-#refresh, #create-cancel, #detail-retry { background: #e5e2dc; color: #22221f; }
+#refresh, #create-cancel, #edit-cancel, #detail-retry { background: #e5e2dc; color: #22221f; }
 dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #dfdcd6; border-radius: 10px; color: inherit; background: #faf9f7; }
 dialog::backdrop { background: #22221f80; }
 dialog form { margin: 0; }

@@ -15,6 +15,7 @@ type HttpOptions = {
   getTickets: () => Promise<{ tickets: Ticket[] }>
   createTicket: (input: unknown) => Promise<Ticket>
   getTicket: (id: string) => Promise<Ticket>
+  updateTicket: (id: string, input: unknown) => Promise<Ticket>
   deleteTicket: (id: string) => Promise<Ticket>
 }
 
@@ -72,6 +73,14 @@ export function createKanbanServer(options: HttpOptions): Server {
       }
 
       const ticketRoute = url.pathname.match(/^\/api\/tickets\/([^/]+)$/)
+      if (ticketRoute && request.method === 'PATCH') {
+        if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+          json(response, 415, { error: 'UNSUPPORTED_MEDIA_TYPE' })
+          return
+        }
+        json(response, 200, { ticket: await options.updateTicket(decodeURIComponent(ticketRoute[1]), await readJson(request)) })
+        return
+      }
       if (ticketRoute && (request.method === 'GET' || request.method === 'DELETE')) {
         const id = decodeURIComponent(ticketRoute[1])
         const ticket = request.method === 'GET'
