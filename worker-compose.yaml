@@ -1,0 +1,5 @@
+containers:
+  kanban:
+    worker: path://./kanban
+    scripts:
+      run: pnpm dev

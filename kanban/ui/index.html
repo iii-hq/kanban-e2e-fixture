@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kanban · Settings</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/page.js"></script>
+</head>
+<body>
+  <header><a href="/">Kanban <span>Workspace</span></a></header>
+  <main>
+    <p class="eyebrow">Workspace settings</p>
+    <h1>A home for your tasks.</h1>
+    <p class="intro">Choose where your board keeps its data.</p>
+    <form id="settings" aria-busy="true">
+      <h2>Storage</h2>
+      <label for="data-dir">Data directory</label>
+      <p id="path-help">Relative paths start at the application’s project folder.</p>
+      <input id="data-dir" name="data_dir" required aria-describedby="path-help" disabled>
+      <p class="resolved">Current location <output id="resolved-path">—</output></p>
+      <div class="actions"><button id="save" disabled>Save settings</button><button id="retry" type="button" hidden>Retry</button></div>
+      <p id="status" role="status" aria-live="polite">Loading settings…</p>
+    </form>
+  </main>
+</body>
+</html>
