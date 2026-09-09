@@ -1,0 +1,6 @@
+containers:
+  kanban:
+    worker: path://./kanban
+    config_name: kanban
+    scripts:
+      run: pnpm dev
