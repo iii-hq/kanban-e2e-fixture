@@ -25,8 +25,7 @@ async function request(method: 'GET' | 'PUT') {
     } : {})
     if (!response.ok) throw new Error(`Unable to ${method === 'GET' ? 'load' : 'save'} settings (${response.status}).`)
     const config = await response.json()
-    if (method === 'PUT' && !boardView.hidden) void loadBoard()
-    if (method === 'PUT' && !ticketView.hidden) void loadTicket()
+    if (method === 'PUT') void refreshLive()
     if (current !== configRequest) return
     input.value = config.data_dir
     resolved.textContent = config.resolved_data_dir
@@ -52,6 +51,7 @@ form.addEventListener('submit', (event) => {
 })
 retry.addEventListener('click', () => { void request('GET') })
 function showView() {
+  ++viewVersion
   ++commentRequest
   commentForm.reset()
   commentFields.disabled = false
@@ -94,11 +94,33 @@ const lanes = [
   ['in_review', 'In review'], ['done', 'Done'],
 ] as const
 let boardRequest = 0
+let viewVersion = 0
+let changeVersion = 0
+let store = ''
+let storeVersion = 0
+let refreshPending = false
+let refreshing = false
+
+async function refreshLive() {
+  refreshPending = true
+  if (refreshing || draggedId || movingTicket) return
+  refreshing = true
+  try {
+    while (refreshPending && !draggedId && !movingTicket) {
+      refreshPending = false
+      if (!boardView.hidden) await loadBoard(true)
+      else if (!ticketView.hidden) await loadTicket(true)
+    }
+  } finally { refreshing = false }
+}
 
 function renderBoard(tickets: Ticket[] | null) {
-  board.replaceChildren()
+  const focused = document.activeElement as HTMLElement | null
+  const focusedId = focused?.closest<HTMLElement>('.ticket')?.dataset.ticketId
+  const cards = new Map([...board.querySelectorAll<HTMLAnchorElement>('.ticket')].map((card) => [card.dataset.ticketId, card]))
+  if (!tickets) board.replaceChildren()
   for (const [status, label] of lanes) {
-    const lane = document.createElement('section')
+    const lane = board.querySelector<HTMLElement>(`.lane[data-status="${status}"]`) ?? document.createElement('section')
     lane.className = 'lane'
     lane.dataset.status = status
     lane.setAttribute('aria-labelledby', `lane-${status}`)
@@ -110,9 +132,12 @@ function renderBoard(tickets: Ticket[] | null) {
     count.className = 'lane-count'
     count.textContent = items ? String(items.length) : '—'
     heading.append(count)
-    lane.append(heading)
+    lane.querySelector('h2')?.remove()
+    lane.prepend(heading)
+    lane.querySelector('.lane-empty')?.remove()
     for (const ticket of items ?? []) {
-      const card = document.createElement('a')
+      const card = cards.get(ticket.id) ?? document.createElement('a')
+      cards.delete(ticket.id)
       card.className = 'ticket'
       card.href = `#ticket/${ticket.id}`
       card.dataset.ticketId = ticket.id
@@ -133,8 +158,8 @@ function renderBoard(tickets: Ticket[] | null) {
       assignee.className = 'assignee'
       assignee.textContent = ticket.assignee ?? 'Unassigned'
       metadata.append(priority, assignee)
-      card.append(key, title, metadata)
-      lane.append(card)
+      card.replaceChildren(key, title, metadata)
+      if (card.parentElement !== lane) lane.append(card)
     }
     if (items?.length === 0) {
       const empty = document.createElement('p')
@@ -142,7 +167,11 @@ function renderBoard(tickets: Ticket[] | null) {
       empty.textContent = 'No tickets'
       lane.append(empty)
     }
-    board.append(lane)
+    if (lane.parentElement !== board) board.append(lane)
+  }
+  for (const card of cards.values()) card.remove()
+  if (focusedId && focused && document.activeElement !== focused) {
+    (focused.isConnected ? focused : board).focus({ preventScroll: true })
   }
 }
 
@@ -167,6 +196,7 @@ board.addEventListener('dragover', (event) => {
 board.addEventListener('dragend', () => {
   draggedId = ''
   board.querySelectorAll('.drop-target').forEach((item) => item.classList.remove('drop-target'))
+  if (refreshPending) void refreshLive()
 })
 board.addEventListener('drop', async (event) => {
   const lane = (event.target as Element).closest<HTMLElement>('.lane')
@@ -185,34 +215,38 @@ board.addEventListener('drop', async (event) => {
       body: JSON.stringify({ status: lane.dataset.status }),
     })
     if (!response.ok) throw new Error(`Unable to move ticket (${response.status}). Try again.`)
-    if (!boardView.hidden) await loadBoard()
-    else if (!ticketView.hidden && editForm.hidden && selectedTicket?.id === id) void loadTicket()
+    void refreshLive()
   } catch (error) {
     if (current === boardRequest) boardStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application. Try again.'
   } finally {
     movingTicket = false
+    if (refreshPending) void refreshLive()
     if (current === boardRequest) refresh.disabled = false
   }
 })
 
-async function loadBoard() {
+async function loadBoard(quiet = false) {
   const current = ++boardRequest
+  const version = changeVersion
   board.setAttribute('aria-busy', 'true')
   refresh.disabled = true
   boardRetry.hidden = true
-  boardStatus.textContent = 'Loading tickets…'
-  ticketCount.textContent = '— tickets'
-  renderBoard(null)
+  if (!quiet) {
+    boardStatus.textContent = 'Loading tickets…'
+    ticketCount.textContent = '— tickets'
+    renderBoard(null)
+  }
   try {
     const response = await fetch('/api/tickets')
     if (!response.ok) throw new Error(`Unable to load tickets (${response.status}).`)
     const { tickets }: { tickets: Ticket[] } = await response.json()
-    if (current !== boardRequest) return
+    if (current !== boardRequest || version !== changeVersion) return
+    if (draggedId) { refreshPending = true; return }
     renderBoard(tickets)
     ticketCount.textContent = `${tickets.length} ${tickets.length === 1 ? 'ticket' : 'tickets'}`
     boardStatus.textContent = tickets.length ? 'Board up to date.' : 'No tickets yet.'
   } catch (error) {
-    if (current !== boardRequest) return
+    if (current !== boardRequest || version !== changeVersion) return
     boardStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
     boardRetry.hidden = false
   } finally {
@@ -233,11 +267,10 @@ const editForm = document.querySelector<HTMLFormElement>('#edit-form')!
 const editFields = document.querySelector<HTMLFieldSetElement>('#edit-fields')!
 let detailRequest = 0
 let selectedTicket: Ticket | undefined
+let editBaseline: Ticket | undefined
 
-function renderTicket(ticket: Ticket) {
-  if (selectedTicket?.id === ticket.id && (selectedTicket.comments?.length ?? 0) > (ticket.comments?.length ?? 0)) {
-    ticket = { ...ticket, comments: selectedTicket.comments }
-  }
+function renderTicket(ticket: Ticket, preserveDraft = false) {
+  if (selectedTicket?.id !== ticket.id) document.querySelector('#activity-list')!.replaceChildren()
   selectedTicket = ticket
   document.title = `Kanban · ${ticket.key}`
   document.querySelector('#detail-key')!.textContent = ticket.key
@@ -246,10 +279,12 @@ function renderTicket(ticket: Ticket) {
   document.querySelector('#detail-ticket-status')!.textContent = lanes.find(([status]) => status === ticket.status)![1]
   document.querySelector('#detail-priority')!.textContent = ticket.priority
   document.querySelector('#detail-assignee')!.textContent = ticket.assignee ?? 'Unassigned'
-  detailContent.hidden = false
-  editForm.hidden = true
-  deleteTicket.disabled = false
-  detailStatus.textContent = ''
+  if (!preserveDraft) {
+    detailContent.hidden = false
+    editForm.hidden = true
+    deleteTicket.disabled = false
+    detailStatus.textContent = ''
+  }
   renderActivity(ticket)
 }
 
@@ -270,9 +305,9 @@ function resetReply() {
 
 function renderActivity(ticket: Ticket) {
   const list = document.querySelector<HTMLOListElement>('#activity-list')!
-  list.replaceChildren()
   document.querySelector<HTMLElement>('#activity-empty')!.hidden = !!ticket.comments?.length
   for (const comment of ticket.comments ?? []) {
+    if (document.getElementById(`comment-${comment.id}`)) continue
     const item = document.createElement('li')
     item.id = `comment-${comment.id}`
     item.dataset.commentId = comment.id
@@ -337,45 +372,56 @@ commentForm.addEventListener('submit', async (event) => {
       body: JSON.stringify({ ...data, parent_id: replyId }),
     })
     if (!response.ok) throw new Error(`Unable to post comment (${response.status}). Try again.`)
-    const { ticket }: { ticket: Ticket } = await response.json()
-    if (selectedTicket?.id === id && (ticket.comments?.length ?? 0) > (selectedTicket.comments?.length ?? 0)) {
-      selectedTicket.comments = ticket.comments
-      renderActivity(selectedTicket)
-    }
     if (current !== commentRequest || selectedTicket?.id !== id) return
     commentBody.value = ''
     resetReply()
     commentStatus.textContent = 'Comment posted.'
+    void refreshLive()
   } catch (error) {
     if (current === commentRequest) commentStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application. Try again.'
   } finally {
     if (current === commentRequest) {
-      commentFields.disabled = false
+      commentFields.disabled = !selectedTicket
       commentForm.setAttribute('aria-busy', 'false')
       if (!detailContent.hidden) commentBody.focus()
     }
   }
 })
 
-async function loadTicket() {
+async function loadTicket(quiet = false) {
   const current = ++detailRequest
-  selectedTicket = undefined
-  detailContent.hidden = true
-  editForm.hidden = true
+  const version = changeVersion
+  if (!quiet) {
+    selectedTicket = undefined
+    detailContent.hidden = true
+    editForm.hidden = true
+    detailTitle.textContent = 'Ticket'
+    document.querySelector('#detail-key')!.textContent = ''
+    detailStatus.textContent = 'Loading ticket…'
+    detailTitle.focus()
+  }
   detailRetry.hidden = true
-  detailTitle.textContent = 'Ticket'
-  document.querySelector('#detail-key')!.textContent = ''
-  detailStatus.textContent = 'Loading ticket…'
   ticketView.setAttribute('aria-busy', 'true')
-  detailTitle.focus()
   try {
     const response = await fetch(`/api/tickets/${encodeURIComponent(decodeURIComponent(location.hash.slice(8)))}`)
+    if (current !== detailRequest || version !== changeVersion) return
+    if (response.status === 404) {
+      selectedTicket = undefined
+      editBaseline = undefined
+      ++commentRequest
+      commentFields.disabled = true
+      editFields.disabled = true
+      deleteTicket.disabled = true
+      detailContent.hidden = true
+      editForm.hidden = true
+      resetReply()
+    }
     if (!response.ok) throw new Error(response.status === 404 ? 'Ticket not found.' : `Unable to load ticket (${response.status}).`)
     const { ticket }: { ticket: Ticket } = await response.json()
-    if (current !== detailRequest) return
-    renderTicket(ticket)
+    if (current !== detailRequest || version !== changeVersion) return
+    renderTicket(ticket, quiet && !!selectedTicket)
   } catch (error) {
-    if (current !== detailRequest) return
+    if (current !== detailRequest || version !== changeVersion) return
     detailStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
     detailRetry.hidden = false
   } finally {
@@ -386,6 +432,7 @@ async function loadTicket() {
 detailRetry.addEventListener('click', () => { void loadTicket() })
 document.querySelector('#edit-ticket')!.addEventListener('click', () => {
   if (!selectedTicket) return
+  editBaseline = selectedTicket
   for (const field of ['title', 'description', 'status', 'priority', 'assignee'] as const) {
     (editForm.elements.namedItem(field) as HTMLInputElement | HTMLSelectElement).value = selectedTicket[field] ?? ''
   }
@@ -405,7 +452,7 @@ document.querySelector('#edit-cancel')!.addEventListener('click', () => {
 editForm.addEventListener('submit', async (event) => {
   event.preventDefault()
   if (!selectedTicket || editFields.disabled) return
-  const current = detailRequest
+  const current = viewVersion
   const data = Object.fromEntries(new FormData(editForm))
   if (!String(data.title).trim()) {
     detailStatus.textContent = 'Enter a title.'
@@ -417,7 +464,7 @@ editForm.addEventListener('submit', async (event) => {
   detailStatus.textContent = 'Saving changes…'
   try {
     const values = { ...data, assignee: String(data.assignee).trim() || null }
-    const changes = Object.fromEntries(Object.entries(values).filter(([field, value]) => value !== selectedTicket![field as keyof Ticket]))
+    const changes = Object.fromEntries(Object.entries(values).filter(([field, value]) => value !== editBaseline![field as keyof Ticket]))
     if (!Object.keys(changes).length) {
       renderTicket(selectedTicket)
       document.querySelector<HTMLButtonElement>('#edit-ticket')!.focus()
@@ -428,39 +475,37 @@ editForm.addEventListener('submit', async (event) => {
       body: JSON.stringify(changes),
     })
     if (!response.ok) throw new Error(`Unable to save ticket (${response.status}).`)
-    const { ticket }: { ticket: Ticket } = await response.json()
-    if (current === detailRequest) {
-      renderTicket(ticket)
+    if (current === viewVersion && selectedTicket) {
+      renderTicket(selectedTicket)
       detailStatus.textContent = 'Changes saved.'
       document.querySelector<HTMLButtonElement>('#edit-ticket')!.focus()
     }
-    else if (!boardView.hidden) void loadBoard()
-    else if (!ticketView.hidden && editForm.hidden && selectedTicket?.id === ticket.id) void loadTicket()
+    void refreshLive()
   } catch (error) {
-    if (current !== detailRequest) return
+    if (current !== viewVersion) return
     detailStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
   } finally {
-    if (current === detailRequest) {
-      editFields.disabled = false
+    if (current === viewVersion) {
+      editFields.disabled = !selectedTicket
       editForm.setAttribute('aria-busy', 'false')
     }
   }
 })
 deleteTicket.addEventListener('click', async () => {
   if (!selectedTicket || deleteTicket.disabled) return
-  const current = detailRequest
+  const current = viewVersion
   deleteTicket.disabled = true
   detailStatus.textContent = 'Deleting ticket…'
   try {
     const response = await fetch(`/api/tickets/${encodeURIComponent(selectedTicket.id)}`, { method: 'DELETE' })
     if (!response.ok) throw new Error(`Unable to delete ticket (${response.status}).`)
-    if (current === detailRequest) {
+    if (current === viewVersion) {
       location.hash = '#board'
     } else if (!boardView.hidden) {
       void loadBoard()
     }
   } catch (error) {
-    if (current !== detailRequest) return
+    if (current !== viewVersion) return
     detailStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
     deleteTicket.disabled = false
   }
@@ -480,6 +525,7 @@ createDialog.addEventListener('cancel', (event) => { if (createFields.disabled) 
 createForm.addEventListener('submit', async (event) => {
   event.preventDefault()
   if (createFields.disabled) return
+  const currentStore = storeVersion
   const data = Object.fromEntries(new FormData(createForm))
   if (!String(data.title).trim()) {
     createStatus.textContent = 'Enter a title.'
@@ -496,13 +542,16 @@ createForm.addEventListener('submit', async (event) => {
     })
     if (!response.ok) throw new Error(`Unable to create ticket (${response.status}).`)
     const { ticket }: { ticket: Ticket } = await response.json()
+    if (currentStore !== storeVersion) return
     createDialog.close()
     location.hash = `#ticket/${ticket.id}`
   } catch (error) {
-    createStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
+    if (currentStore === storeVersion) createStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application.'
   } finally {
-    createFields.disabled = false
-    createForm.setAttribute('aria-busy', 'false')
+    if (currentStore === storeVersion) {
+      createFields.disabled = false
+      createForm.setAttribute('aria-busy', 'false')
+    }
   }
 })
 
@@ -510,3 +559,38 @@ refresh.addEventListener('click', () => { void loadBoard() })
 boardRetry.addEventListener('click', () => { void loadBoard() })
 window.addEventListener('hashchange', showView)
 showView()
+
+const liveStatus = document.querySelector<HTMLElement>('#live-status')!
+const events = new EventSource('/api/events')
+events.addEventListener('open', () => { liveStatus.textContent = 'Live updates connected' })
+events.addEventListener('error', () => { liveStatus.textContent = 'Live updates disconnected. Reconnecting…' })
+events.addEventListener('change', (event) => {
+  const nextStore: string = JSON.parse((event as MessageEvent).data).store
+  ++changeVersion
+  if (store && store !== nextStore) {
+    draggedId = ''
+    ++storeVersion
+    ++viewVersion
+    ++commentRequest
+    selectedTicket = undefined
+    editBaseline = undefined
+    commentForm.reset()
+    commentFields.disabled = false
+    commentForm.setAttribute('aria-busy', 'false')
+    commentStatus.textContent = ''
+    resetReply()
+    editForm.reset()
+    editForm.hidden = true
+    detailContent.hidden = true
+    createDialog.close()
+    createForm.reset()
+    createFields.disabled = false
+    createForm.setAttribute('aria-busy', 'false')
+    board.replaceChildren()
+    ticketCount.textContent = '— tickets'
+    detailStatus.textContent = 'Storage changed. Loading current ticket…'
+    if (!settingsView.hidden && !saving) void request('GET')
+  }
+  store = nextStore
+  void refreshLive()
+})

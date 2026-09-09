@@ -23,6 +23,13 @@ const iii = registerWorker(process.env.III_ENGINE_URL ?? process.env.III_URL, {
 
 let configuration = DEFAULT_CONFIGURATION
 let dataDirectory = resolveDataDirectory(configuration, root)
+const changeListeners = new Set<(store: string) => void>()
+
+function publishChange(store = dataDirectory) {
+  if (store === dataDirectory) {
+    for (const listener of changeListeners) listener(store)
+  }
+}
 
 async function configurationCall<T>(functionId: string, payload: Record<string, unknown>): Promise<T> {
   return iii.trigger({ function_id: functionId, namespace: 'default', payload, timeoutMs: 10_000 }) as Promise<T>
@@ -63,8 +70,10 @@ async function rawConfiguration(): Promise<Record<string, unknown> | null> {
 async function reloadConfiguration(): Promise<{ data_dir: string; resolved_data_dir: string }> {
   const stored = await storedConfiguration()
   if (!stored) throw new Error('CONFIGURATION_NOT_FOUND: kanban is not registered')
+  const previousDirectory = dataDirectory
   configuration = stored
   dataDirectory = resolveDataDirectory(configuration, root)
+  if (dataDirectory !== previousDirectory) publishChange()
   return { data_dir: configuration.data_dir, resolved_data_dir: dataDirectory }
 }
 
@@ -146,9 +155,16 @@ iii.registerTrigger({
 await initializeConfiguration()
 
 iii.registerFunction('kanban::tickets::create', async (payload: unknown) => {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return createTicket(dataDirectory, payload)
+  const store = dataDirectory
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    const ticket = createTicket(store, payload)
+    publishChange(store)
+    return ticket
+  }
   const { _caller_worker_id, ...input } = payload as Record<string, unknown>
-  return createTicket(dataDirectory, input)
+  const ticket = createTicket(store, input)
+  publishChange(store)
+  return ticket
 }, {
   description: 'Create and persist a ticket with a UUID and a human-readable KAN-number key.',
   request_format: createTicketSchema,
@@ -173,7 +189,10 @@ iii.registerFunction('kanban::tickets::update', async (payload: unknown) => {
     throw new Error('INVALID_TICKET: expected an update envelope')
   }
   const { id, changes } = payload as { id: unknown; changes: unknown }
-  return updateTicket(dataDirectory, id, changes)
+  const store = dataDirectory
+  const ticket = updateTicket(store, id, changes)
+  publishChange(store)
+  return ticket
 }, {
   description: 'Update editable fields on a persisted ticket by its UUID or human-readable key.',
   request_format: {
@@ -184,7 +203,12 @@ iii.registerFunction('kanban::tickets::update', async (payload: unknown) => {
   },
   response_format: ticketSchema,
 })
-iii.registerFunction('kanban::tickets::delete', async ({ id }: { id: unknown }) => deleteTicket(dataDirectory, id), {
+iii.registerFunction('kanban::tickets::delete', async ({ id }: { id: unknown }) => {
+  const store = dataDirectory
+  const ticket = deleteTicket(store, id)
+  publishChange(store)
+  return ticket
+}, {
   description: 'Soft-delete a persisted ticket by its internal UUID or human-readable key.',
   request_format: { type: 'object', properties: { id: { type: 'string', minLength: 1 } }, required: ['id'] },
   response_format: ticketSchema,
@@ -194,7 +218,10 @@ iii.registerFunction('kanban::tickets::comment', async (payload: unknown) => {
     throw new Error('INVALID_COMMENT: expected a comment envelope')
   }
   const { id, comment } = payload as { id: unknown; comment: unknown }
-  return addComment(dataDirectory, id, comment)
+  const store = dataDirectory
+  const ticket = addComment(store, id, comment)
+  publishChange(store)
+  return ticket
 }, {
   description: 'Add a comment or reply to a persisted ticket.',
   request_format: {
@@ -209,6 +236,11 @@ iii.registerFunction('kanban::tickets::comment', async (payload: unknown) => {
 const server = await startKanbanServer(
   {
     uiDirectory,
+    getEventStore: () => dataDirectory,
+    subscribeEvents: (listener) => {
+      changeListeners.add(listener)
+      return () => changeListeners.delete(listener)
+    },
     getConfiguration: configurationInfo,
     setDataDirectory,
     getTickets: () => iii.trigger({ function_id: 'kanban::tickets::list', payload: {}, timeoutMs: 10_000 }),
@@ -222,7 +254,9 @@ const server = await startKanbanServer(
 )
 
 const shutdown = async () => {
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  const closed = new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  server.closeAllConnections()
+  await closed
   await iii.shutdown()
   process.exit(0)
 }
