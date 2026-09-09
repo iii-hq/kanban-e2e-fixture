@@ -25,6 +25,28 @@ export const updateTicketSchema = {
   minProperties: 1,
 }
 
+export const addCommentSchema = {
+  type: 'object' as const,
+  properties: {
+    author: { type: 'string', minLength: 1 },
+    body: { type: 'string', minLength: 1 },
+    parent_id: { type: 'string', format: 'uuid' },
+  },
+  required: ['author', 'body'],
+  additionalProperties: false,
+}
+
+export const ticketCommentSchema = {
+  type: 'object' as const,
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    ...addCommentSchema.properties,
+    created_at: { type: 'string', format: 'date-time' },
+  },
+  required: ['id', 'author', 'body', 'created_at'],
+  additionalProperties: false,
+}
+
 export const ticketSchema = {
   type: 'object' as const,
   properties: {
@@ -34,9 +56,18 @@ export const ticketSchema = {
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
     deleted_at: { type: 'string', format: 'date-time' },
+    comments: { type: 'array', items: ticketCommentSchema },
   },
   required: ['id', 'key', 'title', 'description', 'status', 'priority', 'assignee', 'created_at', 'updated_at'],
   additionalProperties: false,
+}
+
+export type TicketComment = {
+  id: string
+  author: string
+  body: string
+  created_at: string
+  parent_id?: string
 }
 
 export type Ticket = {
@@ -50,6 +81,7 @@ export type Ticket = {
   created_at: string
   updated_at: string
   deleted_at?: string
+  comments?: TicketComment[]
 }
 
 type EditableTicket = Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee'>
@@ -58,13 +90,33 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function validComments(value: unknown): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value)) return false
+  const seen = new Set<string>()
+  return value.every((comment) => {
+    if (!object(comment)
+      || !Object.keys(comment).every((key) => Object.hasOwn(ticketCommentSchema.properties, key))
+      || !ticketCommentSchema.required.every((key) => Object.hasOwn(comment, key))
+      || typeof comment.id !== 'string' || !uuid.test(comment.id) || seen.has(comment.id)
+      || typeof comment.author !== 'string' || !comment.author.length || comment.author.trim() !== comment.author
+      || typeof comment.body !== 'string' || !comment.body.length || comment.body.trim() !== comment.body
+      || typeof comment.created_at !== 'string' || Number.isNaN(Date.parse(comment.created_at))
+      || (comment.parent_id !== undefined && (typeof comment.parent_id !== 'string' || !seen.has(comment.parent_id)))) return false
+    seen.add(comment.id)
+    return true
+  })
+}
+
 function validTicket(value: unknown): value is Ticket {
   if (!object(value)) return false
   const keys = Object.keys(value)
   return keys.every((key) => Object.hasOwn(ticketSchema.properties, key))
     && ticketSchema.required.every((key) => keys.includes(key))
     && typeof value.id === 'string'
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id)
+    && uuid.test(value.id)
     && typeof value.key === 'string' && /^KAN-[1-9][0-9]*$/.test(value.key)
     && typeof value.title === 'string' && value.title.trim() === value.title && value.title.length > 0
     && typeof value.description === 'string'
@@ -75,6 +127,7 @@ function validTicket(value: unknown): value is Ticket {
     && typeof value.updated_at === 'string' && !Number.isNaN(Date.parse(value.updated_at))
     && (value.deleted_at === undefined
       || typeof value.deleted_at === 'string' && !Number.isNaN(Date.parse(value.deleted_at)))
+    && validComments(value.comments)
 }
 
 function writeTickets(directory: string, tickets: Ticket[]) {
@@ -146,6 +199,17 @@ function parseTicketChanges(input: unknown): Partial<EditableTicket> {
   return Object.fromEntries(Object.keys(input).map((key) => [key, parsed[key as keyof EditableTicket]]))
 }
 
+function parseComment(input: unknown): Pick<TicketComment, 'author' | 'body' | 'parent_id'> {
+  if (!object(input)
+    || Object.keys(input).some((key) => !Object.hasOwn(addCommentSchema.properties, key))
+    || typeof input.author !== 'string' || !input.author.trim()
+    || typeof input.body !== 'string' || !input.body.trim()
+    || (input.parent_id !== undefined && typeof input.parent_id !== 'string')) {
+    throw new Error('INVALID_COMMENT: expected non-empty author and body with an optional parent_id')
+  }
+  return { author: input.author.trim(), body: input.body.trim(), ...(input.parent_id === undefined ? {} : { parent_id: input.parent_id }) }
+}
+
 export function createTicket(directory: string, input: unknown): Ticket {
   const tickets = readTickets(directory)
   const now = new Date().toISOString()
@@ -178,6 +242,27 @@ export function updateTicket(directory: string, id: unknown, input: unknown): Ti
   const index = tickets.findIndex((item) => !item.deleted_at && (item.id === id || item.key === id))
   if (index === -1) throw new Error(`TICKET_NOT_FOUND: ${id}`)
   const ticket = { ...tickets[index], ...changes, updated_at: new Date().toISOString() }
+  tickets[index] = ticket
+  writeTickets(directory, tickets)
+  return ticket
+}
+
+export function addComment(directory: string, id: unknown, input: unknown): Ticket {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('INVALID_TICKET_ID: expected a non-empty string')
+  const parsed = parseComment(input)
+  const tickets = readTickets(directory)
+  const index = tickets.findIndex((item) => !item.deleted_at && (item.id === id || item.key === id))
+  if (index === -1) throw new Error(`TICKET_NOT_FOUND: ${id}`)
+  const comments = tickets[index].comments ?? []
+  if (parsed.parent_id !== undefined && !comments.some((comment) => comment.id === parsed.parent_id)) {
+    throw new Error(`COMMENT_NOT_FOUND: ${parsed.parent_id}`)
+  }
+  const now = new Date().toISOString()
+  const ticket = {
+    ...tickets[index],
+    comments: [...comments, { id: randomUUID(), ...parsed, created_at: now }],
+    updated_at: now,
+  }
   tickets[index] = ticket
   writeTickets(directory, tickets)
   return ticket

@@ -52,6 +52,12 @@ form.addEventListener('submit', (event) => {
 })
 retry.addEventListener('click', () => { void request('GET') })
 function showView() {
+  ++commentRequest
+  commentForm.reset()
+  commentFields.disabled = false
+  commentForm.setAttribute('aria-busy', 'false')
+  commentStatus.textContent = ''
+  resetReply()
   const leavingTicket = !ticketView.hidden
   const settings = location.hash === '#settings'
   const ticket = location.hash.startsWith('#ticket/')
@@ -229,6 +235,9 @@ let detailRequest = 0
 let selectedTicket: Ticket | undefined
 
 function renderTicket(ticket: Ticket) {
+  if (selectedTicket?.id === ticket.id && (selectedTicket.comments?.length ?? 0) > (ticket.comments?.length ?? 0)) {
+    ticket = { ...ticket, comments: selectedTicket.comments }
+  }
   selectedTicket = ticket
   document.title = `Kanban · ${ticket.key}`
   document.querySelector('#detail-key')!.textContent = ticket.key
@@ -241,7 +250,112 @@ function renderTicket(ticket: Ticket) {
   editForm.hidden = true
   deleteTicket.disabled = false
   detailStatus.textContent = ''
+  renderActivity(ticket)
 }
+
+const commentForm = document.querySelector<HTMLFormElement>('#comment-form')!
+const commentFields = document.querySelector<HTMLFieldSetElement>('#comment-fields')!
+const commentBody = document.querySelector<HTMLTextAreaElement>('#comment-body')!
+const commentStatus = document.querySelector<HTMLElement>('#comment-status')!
+const replyContext = document.querySelector<HTMLElement>('#reply-context')!
+const replyCancel = document.querySelector<HTMLButtonElement>('#reply-cancel')!
+let replyId: string | undefined
+let commentRequest = 0
+
+function resetReply() {
+  replyId = undefined
+  replyContext.hidden = true
+  replyCancel.hidden = true
+}
+
+function renderActivity(ticket: Ticket) {
+  const list = document.querySelector<HTMLOListElement>('#activity-list')!
+  list.replaceChildren()
+  document.querySelector<HTMLElement>('#activity-empty')!.hidden = !!ticket.comments?.length
+  for (const comment of ticket.comments ?? []) {
+    const item = document.createElement('li')
+    item.id = `comment-${comment.id}`
+    item.dataset.commentId = comment.id
+    item.tabIndex = -1
+    const author = document.createElement('strong')
+    author.textContent = comment.author
+    const time = document.createElement('time')
+    time.dateTime = comment.created_at
+    time.textContent = new Date(comment.created_at).toLocaleString()
+    item.append(author, time)
+    if (comment.parent_id) {
+      const parent = ticket.comments!.find((entry) => entry.id === comment.parent_id)!
+      const reference = document.createElement('button')
+      reference.type = 'button'
+      reference.className = 'comment-reference'
+      reference.textContent = `Reply to ${parent.author}: ${parent.body}`
+      reference.addEventListener('click', () => {
+        const target = document.getElementById(`comment-${parent.id}`)!
+        target.focus({ preventScroll: true })
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+      item.append(reference)
+    }
+    const body = document.createElement('p')
+    body.className = 'comment-body'
+    body.textContent = comment.body
+    const reply = document.createElement('button')
+    reply.type = 'button'
+    reply.className = 'comment-reply'
+    reply.textContent = 'Reply'
+    reply.setAttribute('aria-label', `Reply to ${comment.author}`)
+    reply.addEventListener('click', () => {
+      if (commentFields.disabled) return
+      replyId = comment.id
+      replyContext.textContent = `Replying to ${comment.author}: ${comment.body}`
+      replyContext.hidden = false
+      replyCancel.hidden = false
+      commentBody.focus()
+    })
+    item.append(body, reply)
+    list.append(item)
+  }
+}
+
+replyCancel.addEventListener('click', () => { resetReply(); commentBody.focus() })
+commentForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  if (!selectedTicket || commentFields.disabled) return
+  const data = Object.fromEntries(new FormData(commentForm))
+  if (!String(data.author).trim() || !String(data.body).trim()) {
+    commentStatus.textContent = 'Enter your name and a comment.'
+    return
+  }
+  const id = selectedTicket.id
+  const current = commentRequest
+  commentFields.disabled = true
+  commentForm.setAttribute('aria-busy', 'true')
+  commentStatus.textContent = 'Posting comment…'
+  try {
+    const response = await fetch(`/api/tickets/${encodeURIComponent(id)}/comments`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, parent_id: replyId }),
+    })
+    if (!response.ok) throw new Error(`Unable to post comment (${response.status}). Try again.`)
+    const { ticket }: { ticket: Ticket } = await response.json()
+    if (selectedTicket?.id === id && (ticket.comments?.length ?? 0) > (selectedTicket.comments?.length ?? 0)) {
+      selectedTicket.comments = ticket.comments
+      renderActivity(selectedTicket)
+    }
+    if (current !== commentRequest || selectedTicket?.id !== id) return
+    commentBody.value = ''
+    resetReply()
+    commentStatus.textContent = 'Comment posted.'
+  } catch (error) {
+    if (current === commentRequest) commentStatus.textContent = error instanceof Error ? error.message : 'Unable to reach the application. Try again.'
+  } finally {
+    if (current === commentRequest) {
+      commentFields.disabled = false
+      commentForm.setAttribute('aria-busy', 'false')
+      if (!detailContent.hidden) commentBody.focus()
+    }
+  }
+})
 
 async function loadTicket() {
   const current = ++detailRequest

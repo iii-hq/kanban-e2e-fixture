@@ -17,6 +17,7 @@ type HttpOptions = {
   getTicket: (id: string) => Promise<Ticket>
   updateTicket: (id: string, input: unknown) => Promise<Ticket>
   deleteTicket: (id: string) => Promise<Ticket>
+  addComment: (id: string, input: unknown) => Promise<Ticket>
 }
 
 const assets = new Map([
@@ -48,8 +49,8 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 function errorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error)
   if (message.includes('REQUEST_TOO_LARGE')) return 413
-  if (error instanceof URIError || message.includes('INVALID_JSON') || /INVALID_TICKET(?:_ID)?:/.test(message)) return 400
-  if (message.includes('TICKET_NOT_FOUND')) return 404
+  if (error instanceof URIError || message.includes('INVALID_JSON') || /INVALID_(?:TICKET(?:_ID)?|COMMENT):/.test(message)) return 400
+  if (/(?:TICKET|COMMENT)_NOT_FOUND/.test(message)) return 404
   return 500
 }
 
@@ -69,6 +70,16 @@ export function createKanbanServer(options: HttpOptions): Server {
           return
         }
         json(response, 201, { ticket: await options.createTicket(await readJson(request)) })
+        return
+      }
+
+      const commentRoute = url.pathname.match(/^\/api\/tickets\/([^/]+)\/comments$/)
+      if (commentRoute && request.method === 'POST') {
+        if (request.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') {
+          json(response, 415, { error: 'UNSUPPORTED_MEDIA_TYPE' })
+          return
+        }
+        json(response, 201, { ticket: await options.addComment(decodeURIComponent(commentRoute[1]), await readJson(request)) })
         return
       }
 

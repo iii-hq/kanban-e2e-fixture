@@ -46,7 +46,13 @@ The detail panel also supports editing title, description, status, priority and
 assignee. Save persists the changes; cancel discards the draft. Drag a card to
 another board column to change its status. The card moves after the server
 confirms the update. Keyboard and touch users can change status in the detail
-editor. Comments and live synchronization across viewers are not yet included.
+editor. Live synchronization across viewers is not yet included.
+
+The activity timeline shows comments and replies in posting order. Enter a name
+and a comment, or reply to an existing entry. Replies identify their parent
+comment. Names are user-entered labels, not authenticated identities. Comments
+survive ticket edits and soft deletion. This stage does not record field-change
+history or support editing/deleting comments.
 
 ## Tickets
 
@@ -63,6 +69,7 @@ The application exposes these iii functions:
 | `kanban::tickets::get` | `{ "id": "KAN-1" }` or a UUID | Matching ticket; error if absent |
 | `kanban::tickets::delete` | `{ "id": "KAN-1" }` or a UUID | Ticket marked with `deleted_at`; error if absent |
 | `kanban::tickets::update` | `{ "id": "KAN-1", "changes": { "status": "done" } }` or a UUID | Updated ticket; omitted fields are preserved |
+| `kanban::tickets::comment` | `{ "id": "KAN-1", "comment": { "author": "Ana", "body": "Ready for review" } }` or a UUID | Ticket including the appended comment |
 
 The browser uses `POST /api/tickets` to create, and `GET` / `DELETE`
 `/api/tickets/:id` to open or delete a ticket. These endpoints invoke the iii
@@ -71,6 +78,11 @@ Deleted tickets are excluded from list and get; their identifiers are never reus
 `PATCH /api/tickets/:id` accepts a JSON object of editable fields and returns
 `{ "ticket": ... }`. IDs and creation/deletion timestamps cannot be edited,
 and deleted tickets cannot be updated.
+`POST /api/tickets/:id/comments` accepts `{ "author": "Ana", "body": "..." }`
+and an optional `parent_id` identifying a comment on the same ticket. It returns
+`201 { "ticket": ... }`. `GET /api/tickets/:id` includes the optional `comments`
+array; tickets from earlier commits do not need migration. Comments cannot be
+added to deleted tickets.
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, and `done`.
 Priorities are `low`, `medium`, `high`, and `urgent`. New tickets default to
