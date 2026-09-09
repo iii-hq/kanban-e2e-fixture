@@ -4,6 +4,10 @@ This repository is the versioned reference application for Kanban engineering sc
 Each task starts from a recorded commit and asks the subject to reproduce the next
 product change in a disposable checkout.
 
+The [scenario catalog](scenarios/README.md) specifies the seven commit-to-commit
+tasks, public prompts, acceptance criteria and evaluation protocol. It is not
+yet an executable Harness integration.
+
 The initial commit intentionally contains no application. The first change creates
 the `kanban/` Node application and its iii-backed configuration surface.
 
