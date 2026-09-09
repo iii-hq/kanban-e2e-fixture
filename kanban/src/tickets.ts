@@ -26,6 +26,7 @@ export const ticketSchema = {
     ...createTicketSchema.properties,
     created_at: { type: 'string', format: 'date-time' },
     updated_at: { type: 'string', format: 'date-time' },
+    deleted_at: { type: 'string', format: 'date-time' },
   },
   required: ['id', 'key', 'title', 'description', 'status', 'priority', 'assignee', 'created_at', 'updated_at'],
   additionalProperties: false,
@@ -41,6 +42,7 @@ export type Ticket = {
   assignee: string | null
   created_at: string
   updated_at: string
+  deleted_at?: string
 }
 
 function object(value: unknown): value is Record<string, unknown> {
@@ -50,7 +52,7 @@ function object(value: unknown): value is Record<string, unknown> {
 function validTicket(value: unknown): value is Ticket {
   if (!object(value)) return false
   const keys = Object.keys(value)
-  return keys.length === ticketSchema.required.length
+  return keys.every((key) => Object.hasOwn(ticketSchema.properties, key))
     && ticketSchema.required.every((key) => keys.includes(key))
     && typeof value.id === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.id)
@@ -62,6 +64,16 @@ function validTicket(value: unknown): value is Ticket {
     && (typeof value.assignee === 'string' || value.assignee === null)
     && typeof value.created_at === 'string' && !Number.isNaN(Date.parse(value.created_at))
     && typeof value.updated_at === 'string' && !Number.isNaN(Date.parse(value.updated_at))
+    && (value.deleted_at === undefined
+      || typeof value.deleted_at === 'string' && !Number.isNaN(Date.parse(value.deleted_at)))
+}
+
+function writeTickets(directory: string, tickets: Ticket[]) {
+  mkdirSync(directory, { recursive: true })
+  const file = join(directory, 'tickets.json')
+  const temporary = `${file}.${process.pid}.tmp`
+  writeFileSync(temporary, `${JSON.stringify(tickets, null, 2)}\n`)
+  renameSync(temporary, file)
 }
 
 function readTickets(directory: string): Ticket[] {
@@ -127,21 +139,29 @@ export function createTicket(directory: string, input: unknown): Ticket {
     created_at: now,
     updated_at: now,
   }
-  mkdirSync(directory, { recursive: true })
-  const file = join(directory, 'tickets.json')
-  const temporary = `${file}.${process.pid}.tmp`
-  writeFileSync(temporary, `${JSON.stringify([...tickets, ticket], null, 2)}\n`)
-  renameSync(temporary, file)
+  writeTickets(directory, [...tickets, ticket])
   return ticket
 }
 
 export function listTickets(directory: string): Ticket[] {
-  return readTickets(directory)
+  return readTickets(directory).filter((ticket) => !ticket.deleted_at)
 }
 
 export function getTicket(directory: string, id: unknown): Ticket {
   if (typeof id !== 'string' || !id.trim()) throw new Error('INVALID_TICKET_ID: expected a non-empty string')
-  const ticket = readTickets(directory).find((item) => item.id === id || item.key === id)
+  const ticket = readTickets(directory).find((item) => !item.deleted_at && (item.id === id || item.key === id))
   if (!ticket) throw new Error(`TICKET_NOT_FOUND: ${id}`)
+  return ticket
+}
+
+export function deleteTicket(directory: string, id: unknown): Ticket {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('INVALID_TICKET_ID: expected a non-empty string')
+  const tickets = readTickets(directory)
+  const index = tickets.findIndex((item) => !item.deleted_at && (item.id === id || item.key === id))
+  if (index === -1) throw new Error(`TICKET_NOT_FOUND: ${id}`)
+  const deletedAt = new Date().toISOString()
+  const ticket = { ...tickets[index], updated_at: deletedAt, deleted_at: deletedAt }
+  tickets[index] = ticket
+  writeTickets(directory, tickets)
   return ticket
 }

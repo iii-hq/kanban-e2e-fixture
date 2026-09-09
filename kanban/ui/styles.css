@@ -17,8 +17,8 @@ form { background: #faf9f7; border-radius: 6px; padding: clamp(20px, 4vw, 32px);
 h2 { font-size: 18px; margin: 0 0 28px; }
 label { display: block; font-size: 14px; font-weight: 600; }
 #path-help, .resolved, #status { font-size: 13px; color: #68655f; line-height: 1.6; }
-input { width: 100%; border: 1px solid transparent; border-radius: 6px; background: #eeece8; padding: 12px; font: inherit; }
-input:focus-visible, button:focus-visible, a:focus-visible, .board:focus-visible { outline: 2px solid #b8420f; outline-offset: 3px; }
+input, textarea, select { width: 100%; border: 1px solid transparent; border-radius: 6px; background: #eeece8; padding: 12px; font: inherit; }
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible, .board:focus-visible { outline: 2px solid #b8420f; outline-offset: 3px; }
 output { display: block; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
 .actions { display: flex; gap: 12px; margin-top: 28px; }
 button { border: 0; border-radius: 6px; background: #22221f; color: #fff; padding: 12px 18px; font: inherit; font-size: 13px; cursor: pointer; }
@@ -37,7 +37,8 @@ button:disabled { opacity: .45; cursor: default; }
 .lane { min-width: 0; min-height: 340px; padding: 16px 12px; background: #eae7e1; border-radius: 8px; scroll-snap-align: start; }
 .lane h2 { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; margin: 0 2px 20px; }
 .lane-count { font-size: 11px; font-weight: 500; color: #68655f; background: #f2f0ed; border-radius: 5px; min-width: 23px; padding: 3px 6px; text-align: center; }
-.ticket { background: #faf9f7; border: 1px solid #dedbd4; border-radius: 6px; padding: 15px; margin-top: 10px; overflow-wrap: anywhere; }
+.ticket { display: block; color: inherit; text-decoration: none; background: #faf9f7; border: 1px solid #dedbd4; border-radius: 6px; padding: 15px; margin-top: 10px; overflow-wrap: anywhere; }
+.ticket:hover { border-color: #aaa297; }
 .ticket-key { margin: 0 0 9px; color: #68655f; font: 11px ui-monospace, monospace; }
 .ticket h3 { font-size: 14px; font-weight: 550; line-height: 1.5; margin: 0; }
 .ticket-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 20px; font-size: 11px; }
@@ -46,6 +47,31 @@ button:disabled { opacity: .45; cursor: default; }
 .priority[data-priority="urgent"] { background: #f3dcd4; color: #953e2a; }
 .assignee { color: #68655f; }
 .lane-empty { color: #68655f; text-align: center; font-size: 12px; padding: 24px 8px; border: 1px dashed #d3cfc7; border-radius: 6px; }
+.board-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+#refresh, #create-cancel, #detail-retry { background: #e5e2dc; color: #22221f; }
+dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid #dfdcd6; border-radius: 10px; color: inherit; background: #faf9f7; }
+dialog::backdrop { background: #22221f80; }
+dialog form { margin: 0; }
+dialog h2 { margin: 8px 0 24px; font-size: 28px; letter-spacing: -.03em; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset label { margin: 18px 0 8px; }
+fieldset > label:first-child { margin-top: 0; }
+textarea { resize: vertical; min-height: 90px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.field-row > div { min-width: 0; }
+#create-status, #detail-status { font-size: 13px; line-height: 1.6; min-height: 21px; }
+#ticket-view { max-width: 880px; margin: 0 auto; }
+.back-link { display: inline-block; margin-bottom: 32px; color: #57544e; font-size: 13px; }
+#detail-title, #detail-description, .ticket-properties dd { overflow-wrap: anywhere; }
+.ticket-properties { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; padding: 24px; background: #eae7e1; border-radius: 8px; margin: 16px 0 36px; }
+.ticket-properties dt { font-size: 12px; color: #68655f; margin-bottom: 10px; }
+.ticket-properties dd { margin: 0; font-size: 14px; }
+#detail-priority { text-transform: capitalize; }
+#detail-content h2 { margin-bottom: 16px; }
+#detail-description { white-space: pre-wrap; line-height: 1.7; }
+.delete-area { margin-top: 40px; border-top: 1px solid #dfdcd6; padding-top: 20px; }
+.delete-area p { font-size: 13px; color: #68655f; line-height: 1.6; }
+#delete-ticket { color: #953e2a; background: #f3dcd4; }
 [hidden] { display: none !important; }
 @media (max-width: 600px) {
   .site-header { padding: 16px 20px; }
@@ -54,4 +80,5 @@ button:disabled { opacity: .45; cursor: default; }
   .board-heading { align-items: flex-start; flex-direction: column; }
   .board { grid-template-columns: repeat(5, minmax(260px, 82vw)); }
   .board-summary { margin-top: 24px; }
+  .ticket-properties { grid-template-columns: 1fr; gap: 20px; }
 }

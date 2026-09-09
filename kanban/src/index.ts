@@ -9,7 +9,7 @@ import {
   type KanbanConfiguration,
 } from './config.js'
 import { startKanbanServer } from './http.js'
-import { createTicket, createTicketSchema, getTicket, listTickets, ticketSchema } from './tickets.js'
+import { createTicket, createTicketSchema, deleteTicket, getTicket, listTickets, ticketSchema } from './tickets.js'
 
 const WORKER = 'kanban'
 const CONFIG_RELOAD_FUNCTION = 'kanban::config::reload'
@@ -145,7 +145,11 @@ iii.registerTrigger({
 
 await initializeConfiguration()
 
-iii.registerFunction('kanban::tickets::create', async ({ _caller_worker_id, ...input }: Record<string, unknown>) => createTicket(dataDirectory, input), {
+iii.registerFunction('kanban::tickets::create', async (payload: unknown) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return createTicket(dataDirectory, payload)
+  const { _caller_worker_id, ...input } = payload as Record<string, unknown>
+  return createTicket(dataDirectory, input)
+}, {
   description: 'Create and persist a ticket with a UUID and a human-readable KAN-number key.',
   request_format: createTicketSchema,
   response_format: ticketSchema,
@@ -164,6 +168,11 @@ iii.registerFunction('kanban::tickets::get', async ({ id }: { id: unknown }) => 
   request_format: { type: 'object', properties: { id: { type: 'string', minLength: 1 } }, required: ['id'] },
   response_format: ticketSchema,
 })
+iii.registerFunction('kanban::tickets::delete', async ({ id }: { id: unknown }) => deleteTicket(dataDirectory, id), {
+  description: 'Soft-delete a persisted ticket by its internal UUID or human-readable key.',
+  request_format: { type: 'object', properties: { id: { type: 'string', minLength: 1 } }, required: ['id'] },
+  response_format: ticketSchema,
+})
 
 const server = await startKanbanServer(
   {
@@ -171,6 +180,9 @@ const server = await startKanbanServer(
     getConfiguration: configurationInfo,
     setDataDirectory,
     getTickets: () => iii.trigger({ function_id: 'kanban::tickets::list', payload: {}, timeoutMs: 10_000 }),
+    createTicket: (input) => iii.trigger({ function_id: 'kanban::tickets::create', payload: input, timeoutMs: 10_000 }),
+    getTicket: (id) => iii.trigger({ function_id: 'kanban::tickets::get', payload: { id }, timeoutMs: 10_000 }),
+    deleteTicket: (id) => iii.trigger({ function_id: 'kanban::tickets::delete', payload: { id }, timeoutMs: 10_000 }),
   },
   Number(process.env.PORT ?? 3000),
 )
