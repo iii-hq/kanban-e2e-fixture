@@ -1,0 +1,105 @@
+import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+import { createTicket, getTicket, listTickets } from '../src/tickets.js'
+
+async function directory() {
+  return mkdtemp(join(tmpdir(), 'kanban-tickets-'))
+}
+
+test('persists tickets with defaults and finds them by UUID or human-readable key', async () => {
+  const root = await directory()
+  try {
+    const first = createTicket(root, { title: '  First ticket  ' })
+    const second = createTicket(root, {
+      title: 'Second ticket',
+      description: 'Details',
+      status: 'in_progress',
+      priority: 'high',
+      assignee: 'Taylor',
+    })
+
+    assert.equal(first.key, 'KAN-1')
+    assert.equal(first.title, 'First ticket')
+    assert.equal(first.description, '')
+    assert.equal(first.status, 'backlog')
+    assert.equal(first.priority, 'medium')
+    assert.equal(first.assignee, null)
+    assert.equal(first.created_at, first.updated_at)
+    assert.deepEqual(getTicket(root, first.id), first)
+    assert.deepEqual(getTicket(root, second.key), second)
+    assert.deepEqual(listTickets(root), [first, second])
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'tickets.json'), 'utf8')), [first, second])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('serial calls keep keys unique and stores remain isolated when directories switch', async () => {
+  const firstRoot = await directory()
+  const secondRoot = await directory()
+  try {
+    const created = await Promise.all(Array.from({ length: 20 }, (_, index) =>
+      Promise.resolve().then(() => createTicket(firstRoot, { title: `Ticket ${index}` })),
+    ))
+    assert.equal(new Set(created.map(({ id }) => id)).size, 20)
+    assert.deepEqual(created.map(({ key }) => key), Array.from({ length: 20 }, (_, index) => `KAN-${index + 1}`))
+
+    const other = createTicket(secondRoot, { title: 'Other store' })
+    assert.equal(other.key, 'KAN-1')
+    assert.equal(listTickets(firstRoot).length, 20)
+    assert.deepEqual(listTickets(secondRoot), [other])
+  } finally {
+    await Promise.all([
+      rm(firstRoot, { recursive: true, force: true }),
+      rm(secondRoot, { recursive: true, force: true }),
+    ])
+  }
+})
+
+test('rejects invalid inputs', async () => {
+  const root = await directory()
+  try {
+    for (const input of [
+      null,
+      {},
+      { title: ' ' },
+      { title: 'Ticket', extra: true },
+      { title: 'Ticket', description: 1 },
+      { title: 'Ticket', status: 'closed' },
+      { title: 'Ticket', priority: 'normal' },
+      { title: 'Ticket', assignee: 1 },
+    ]) {
+      assert.throws(() => createTicket(root, input), /INVALID_TICKET/)
+    }
+    assert.throws(() => getTicket(root, null), /INVALID_TICKET_ID/)
+    assert.throws(() => getTicket(root, 'KAN-404'), /TICKET_NOT_FOUND/)
+    assert.deepEqual(listTickets(root), [])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('fails closed without overwriting a malformed store', async () => {
+  const root = await directory()
+  const file = join(root, 'tickets.json')
+  try {
+    await writeFile(file, '{broken')
+    assert.throws(() => listTickets(root), /INVALID_TICKET_STORE/)
+    assert.throws(() => createTicket(root, { title: 'Must not overwrite' }), /INVALID_TICKET_STORE/)
+    assert.equal(await readFile(file, 'utf8'), '{broken')
+
+    await writeFile(file, JSON.stringify([{ id: 'not-a-ticket' }]))
+    assert.throws(() => createTicket(root, { title: 'Still must not overwrite' }), /INVALID_TICKET_STORE/)
+    assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), [{ id: 'not-a-ticket' }])
+
+    await writeFile(file, '[]')
+    const ticket = createTicket(root, { title: 'Duplicate' })
+    await writeFile(file, JSON.stringify([ticket, ticket]))
+    assert.throws(() => listTickets(root), /INVALID_TICKET_STORE/)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
