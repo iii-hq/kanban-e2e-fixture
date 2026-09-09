@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { startKanbanServer } from '../src/http.js'
-import { createTicket, deleteTicket, getTicket, listTickets } from '../src/tickets.js'
+import { createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
 
 test('serves the browser UI and configuration API on exact routes', async () => {
   const uiDirectory = await mkdtemp(join(tmpdir(), 'kanban-ui-'))
@@ -22,6 +22,7 @@ test('serves the browser UI and configuration API on exact routes', async () => 
     getTickets: async () => ({ tickets: listTickets(uiDirectory) }),
     createTicket: async (input) => createTicket(uiDirectory, input),
     getTicket: async (id) => getTicket(uiDirectory, id),
+    updateTicket: async (id, input) => updateTicket(uiDirectory, id, input),
     deleteTicket: async (id) => deleteTicket(uiDirectory, id),
     getConfiguration: async () => ({
       data_dir: stored.data_dir as string,
@@ -63,6 +64,12 @@ test('serves the browser UI and configuration API on exact routes', async () => 
     const createdTicket = (await created.json() as { ticket: ReturnType<typeof createTicket> }).ticket
     assert.equal(createdTicket.title, 'Created through HTTP')
     assert.deepEqual(await (await request(`/api/tickets/${createdTicket.id}`)).json(), { ticket: createdTicket })
+    const updated = await request(`/api/tickets/${createdTicket.key}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'done', assignee: 'Taylor' }),
+    })
+    assert.equal(updated.status, 200)
+    assert.deepEqual(await updated.json(), { ticket: { ...createdTicket, status: 'done', assignee: 'Taylor', updated_at: getTicket(uiDirectory, createdTicket.id).updated_at } })
     const deleted = await request(`/api/tickets/${createdTicket.key}`, { method: 'DELETE' })
     assert.equal(deleted.status, 200)
     assert.equal((await deleted.json() as { ticket: { deleted_at?: string } }).ticket.deleted_at !== undefined, true)
@@ -110,6 +117,7 @@ test('rejects invalid configuration and reports save errors', async () => {
     getTickets: async () => { throw new Error('INVALID_TICKET_STORE: store unavailable') },
     createTicket: async () => { throw new Error('Function failed: INVALID_TICKET: title must be a non-empty string') },
     getTicket: async () => { throw new Error('Function failed: TICKET_NOT_FOUND: KAN-404') },
+    updateTicket: async () => { throw new Error('Function failed: INVALID_TICKET: invalid status') },
     deleteTicket: async () => { throw new Error('Function failed: TICKET_NOT_FOUND: KAN-404') },
     getConfiguration: async () => ({ data_dir: './data', resolved_data_dir: '/project/data' }),
     setDataDirectory: async () => { throw new Error('save failed') },
@@ -141,7 +149,13 @@ test('rejects invalid configuration and reports save errors', async () => {
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-404`, { method: 'DELETE' })).status, 404)
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/`)).status, 404)
     assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/%`)).status, 400)
-    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1`, { method: 'PATCH' })).status, 404)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1`, { method: 'PATCH' })).status, 415)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: '{',
+    })).status, 400)
+    assert.equal((await fetch(`http://127.0.0.1:${port}/api/tickets/KAN-1`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 'closed' }),
+    })).status, 400)
     assert.equal((await request('{')).status, 400)
     assert.equal((await request(JSON.stringify({ data_dir: ' ' }))).status, 400)
     const failed = await request(JSON.stringify({ data_dir: './other' }))

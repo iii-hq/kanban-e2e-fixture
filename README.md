@@ -42,7 +42,11 @@ ticket opens in its own detail panel in the same browser tab. Board cards also
 open this panel, with a URL hash that supports direct links and browser history.
 The detail panel shows the ticket fields and offers **Delete ticket**. Deletion
 returns to the board and hides the ticket without removing its record from disk.
-Editing, drag-and-drop, comments and live board synchronization are not yet included.
+The detail panel also supports editing title, description, status, priority and
+assignee. Save persists the changes; cancel discards the draft. Drag a card to
+another board column to change its status. The card moves after the server
+confirms the update. Keyboard and touch users can change status in the detail
+editor. Comments and live synchronization across viewers are not yet included.
 
 ## Tickets
 
@@ -58,11 +62,15 @@ The application exposes these iii functions:
 | `kanban::tickets::list` | `{}` | `{ "tickets": [...] }` in creation order |
 | `kanban::tickets::get` | `{ "id": "KAN-1" }` or a UUID | Matching ticket; error if absent |
 | `kanban::tickets::delete` | `{ "id": "KAN-1" }` or a UUID | Ticket marked with `deleted_at`; error if absent |
+| `kanban::tickets::update` | `{ "id": "KAN-1", "changes": { "status": "done" } }` or a UUID | Updated ticket; omitted fields are preserved |
 
 The browser uses `POST /api/tickets` to create, and `GET` / `DELETE`
 `/api/tickets/:id` to open or delete a ticket. These endpoints invoke the iii
 functions and return `{ "ticket": ... }`. Both UUIDs and readable keys work.
 Deleted tickets are excluded from list and get; their identifiers are never reused.
+`PATCH /api/tickets/:id` accepts a JSON object of editable fields and returns
+`{ "ticket": ... }`. IDs and creation/deletion timestamps cannot be edited,
+and deleted tickets cannot be updated.
 
 Statuses are `backlog`, `todo`, `in_progress`, `in_review`, and `done`.
 Priorities are `low`, `medium`, `high`, and `urgent`. New tickets default to

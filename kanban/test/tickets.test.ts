@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { createTicket, deleteTicket, getTicket, listTickets } from '../src/tickets.js'
+import { createTicket, deleteTicket, getTicket, listTickets, updateTicket } from '../src/tickets.js'
 
 async function directory() {
   return mkdtemp(join(tmpdir(), 'kanban-tickets-'))
@@ -74,6 +74,58 @@ test('soft-deletes tickets without reusing keys', async () => {
     const stored = JSON.parse(await readFile(join(root, 'tickets.json'), 'utf8'))
     assert.deepEqual(stored, [deleted])
     assert.equal(createTicket(root, { title: 'After restart' }).key, 'KAN-2')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('partially updates editable fields and persists them', async () => {
+  const root = await directory()
+  try {
+    const original = createTicket(root, { title: 'Original', description: 'Keep me', assignee: 'Taylor' })
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    const partial = updateTicket(root, original.key, { title: '  Updated  ', status: 'in_progress' })
+    assert.equal(partial.title, 'Updated')
+    assert.equal(partial.status, 'in_progress')
+    assert.equal(partial.description, original.description)
+    assert.equal(partial.priority, original.priority)
+    assert.equal(partial.assignee, original.assignee)
+    assert.equal(partial.id, original.id)
+    assert.equal(partial.key, original.key)
+    assert.equal(partial.created_at, original.created_at)
+    assert.notEqual(partial.updated_at, original.updated_at)
+
+    const updated = updateTicket(root, original.id, {
+      title: 'Everything', description: 'Changed', status: 'done', priority: 'urgent', assignee: null,
+    })
+    assert.deepEqual(getTicket(root, original.key), updated)
+    assert.deepEqual(JSON.parse(await readFile(join(root, 'tickets.json'), 'utf8')), [updated])
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('rejects invalid updates without writing or resurrecting tickets', async () => {
+  const root = await directory()
+  try {
+    const ticket = createTicket(root, { title: 'Unchanged' })
+    const file = join(root, 'tickets.json')
+    const before = await readFile(file, 'utf8')
+    for (const changes of [
+      null, {}, { id: 'replacement' }, { key: 'KAN-9' }, { created_at: new Date().toISOString() },
+      { updated_at: new Date().toISOString() }, { deleted_at: null }, { status: 'closed' },
+      { priority: 'normal' }, { assignee: 1 }, { title: ' ' }, { description: null },
+    ]) {
+      assert.throws(() => updateTicket(root, ticket.id, changes), /INVALID_TICKET/)
+      assert.equal(await readFile(file, 'utf8'), before)
+    }
+    assert.throws(() => updateTicket(root, 'KAN-404', { title: 'Missing' }), /TICKET_NOT_FOUND/)
+    assert.equal(await readFile(file, 'utf8'), before)
+
+    deleteTicket(root, ticket.id)
+    const deleted = await readFile(file, 'utf8')
+    assert.throws(() => updateTicket(root, ticket.key, { title: 'Resurrected' }), /TICKET_NOT_FOUND/)
+    assert.equal(await readFile(file, 'utf8'), deleted)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

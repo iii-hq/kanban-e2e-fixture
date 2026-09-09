@@ -18,6 +18,13 @@ export const createTicketSchema = {
   additionalProperties: false,
 }
 
+export const updateTicketSchema = {
+  type: 'object' as const,
+  properties: createTicketSchema.properties,
+  additionalProperties: false,
+  minProperties: 1,
+}
+
 export const ticketSchema = {
   type: 'object' as const,
   properties: {
@@ -44,6 +51,8 @@ export type Ticket = {
   updated_at: string
   deleted_at?: string
 }
+
+type EditableTicket = Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee'>
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -126,7 +135,15 @@ function parseCreateTicket(input: unknown) {
     status: input.status ?? 'backlog',
     priority: input.priority ?? 'medium',
     assignee: input.assignee ?? null,
-  } as Pick<Ticket, 'title' | 'description' | 'status' | 'priority' | 'assignee'>
+  } as EditableTicket
+}
+
+function parseTicketChanges(input: unknown): Partial<EditableTicket> {
+  if (!object(input) || Object.keys(input).length === 0) {
+    throw new Error('INVALID_TICKET: changes must be a non-empty object')
+  }
+  const parsed = parseCreateTicket({ title: '_', ...input })
+  return Object.fromEntries(Object.keys(input).map((key) => [key, parsed[key as keyof EditableTicket]]))
 }
 
 export function createTicket(directory: string, input: unknown): Ticket {
@@ -151,6 +168,18 @@ export function getTicket(directory: string, id: unknown): Ticket {
   if (typeof id !== 'string' || !id.trim()) throw new Error('INVALID_TICKET_ID: expected a non-empty string')
   const ticket = readTickets(directory).find((item) => !item.deleted_at && (item.id === id || item.key === id))
   if (!ticket) throw new Error(`TICKET_NOT_FOUND: ${id}`)
+  return ticket
+}
+
+export function updateTicket(directory: string, id: unknown, input: unknown): Ticket {
+  if (typeof id !== 'string' || !id.trim()) throw new Error('INVALID_TICKET_ID: expected a non-empty string')
+  const changes = parseTicketChanges(input)
+  const tickets = readTickets(directory)
+  const index = tickets.findIndex((item) => !item.deleted_at && (item.id === id || item.key === id))
+  if (index === -1) throw new Error(`TICKET_NOT_FOUND: ${id}`)
+  const ticket = { ...tickets[index], ...changes, updated_at: new Date().toISOString() }
+  tickets[index] = ticket
+  writeTickets(directory, tickets)
   return ticket
 }
 
