@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const catalog = JSON.parse(readFileSync(new URL('./catalog.json', import.meta.url), 'utf8'))
-assert.equal(catalog.schema, 'kanban-scenarios/v1')
+assert.equal(catalog.schema, 'kanban-scenarios')
 assert.equal(catalog.status, 'specification-only')
 assert.equal(catalog.cases.length, 7)
 assert.equal(new Set(catalog.cases.map(item => item.id)).size, catalog.cases.length)
