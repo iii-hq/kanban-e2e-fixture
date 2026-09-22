@@ -7,15 +7,17 @@ referência não precisa ser reproduzida linha por linha.
 
 | Caso | Base | Referência | Incremento |
 | --- | --- | --- | --- |
-| C1 | `3d50910` | `6bfb939` | Fundação standalone, iii, Compose e configuração |
-| C2 | `6bfb939` | `4540366` | Persistência e identificadores |
-| C3 | `4540366` | `10ff365` | Board de cinco colunas |
-| C4 | `10ff365` | `adb10c2` | Criação, detalhes e exclusão lógica |
-| C5 | `adb10c2` | `13058b0` | Edição parcial e drag-and-drop |
-| C6 | `13058b0` | `f7fc4f0` | Comentários, respostas e timeline |
-| C7 | `f7fc4f0` | `573f523` | Sincronização reativa |
+| C1 | `3d50910` | `2475d92` | Fundação standalone, iii, Compose e configuração |
+| C2 | `2475d92` | `35a6999` | Persistência e identificadores |
+| C3 | `35a6999` | `6f22064` | Board de cinco colunas |
+| C4 | `6f22064` | `9a6dced` | Criação, detalhes e exclusão lógica |
+| C5 | `9a6dced` | `c654557` | Edição parcial e drag-and-drop |
+| C6 | `c654557` | `9a39938` | Comentários, respostas e timeline |
+| C7 | `9a39938` | `f24040d` | Sincronização reativa |
 
-Os hashes completos no JSON são a fonte de verdade. O commit que introduz este
+A cadeia atual declara `config_name: kanban` no `worker-compose.yaml` desde C1, para que o
+Compose nunca migre o id da configuração; a cadeia anterior (`6bfb939`..`573f523`) segue no
+histórico para catálogos antigos. Os hashes completos no JSON são a fonte de verdade. O commit que introduz este
 catálogo não é uma oitava tarefa de produto. Não reescrever os commits de referência.
 
 ## Verificação e prompt
